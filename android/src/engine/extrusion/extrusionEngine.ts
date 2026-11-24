@@ -257,7 +257,7 @@ export function executeSpawn(
     owner: player,
     claimedBy: player,
     frozenBy: null,
-    baseColor: player === 1 ? "#3B82F6" : "#EF4444",
+    baseColor: player === 1 ? "#2563EB" : "#EF4444",
   };
 
   nextBoard.boxes[boxId] = newBox;

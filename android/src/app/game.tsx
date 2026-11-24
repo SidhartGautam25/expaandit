@@ -29,6 +29,7 @@ import { parseRouteParam, parseRouteGameMode } from "../utils/routeParams";
 import { GameSceneBackground } from "../components/ui/GameSceneBackground";
 import { AppLoadingScreen } from "../components/ui/AppLoadingScreen";
 import { GameHeaderBar } from "../components/ui/GameHeaderBar";
+import { CompactGameHeader } from "../components/ui/CompactGameHeader";
 import { useGameFonts } from "../hooks/useGameFonts";
 import { getGameLayoutDensity } from "../utils/gameLayoutDensity";
 import { GAME_TYPOGRAPHY } from "../constants/theme";
@@ -601,50 +602,22 @@ export default function GameScreen() {
               isTightLayout && styles.topHeaderPanelTight,
             ]}
           >
-            <GameHeaderBar
+            <CompactGameHeader
               levelNumber={level.campaignNumber}
               stageName={level.name}
-              density={layoutDensity}
+              player1Score={scores.player1}
+              player2Score={scores.player2}
+              totalBoxes={totalBoxes}
+              activePlayer={activePlayer}
+              tapsRemaining={turn.tapsRemaining}
+              isBotThinking={isBotThinking}
+              winner={winner}
               gameMode={gameMode}
-              dimensions={{ rows: level.rows, cols: level.cols }}
-              botLabel={
-                gameMode === "bot"
-                  ? LEVEL_REGISTRY[level.botDifficulty]?.name ?? "Bot"
-                  : undefined
-              }
+              player1ColorHex={player1ColorHex}
+              player2ColorHex={player2ColorHex}
+              density={layoutDensity}
             />
           </View>
-
-          <ScoreBoard
-            player1Score={scores.player1}
-            player2Score={scores.player2}
-            activePlayer={activePlayer}
-            isBotThinking={isBotThinking}
-            winner={winner}
-            gameMode={gameMode}
-            tapsRemaining={turn.tapsRemaining}
-            tapsPerTurn={turn.tapsPerTurn}
-            totalBoxes={totalBoxes}
-            powerMessage={powerMessage}
-            player1ColorHex={player1ColorHex}
-            player2ColorHex={player2ColorHex}
-            density={layoutDensity}
-          />
-
-          <ResourceBar
-            resources={activePlayerState.resources}
-            alwaysShow={level.showResources}
-          />
-
-          <PowerBar
-            powers={activePlayerState.powers}
-            selectedPower={selectedPower}
-            targetingMode={targetingMode}
-            onActivatePower={activatePower}
-            onCancelTargeting={cancelPowerTargeting}
-            disabled={isInteractionDisabled}
-            alwaysShowHint={level.showPowers}
-          />
         </View>
 
         <View
@@ -680,21 +653,6 @@ export default function GameScreen() {
             isTightLayout && styles.bottomControlsContainerTight,
           ]}
         >
-          <Pressable
-            style={[
-              styles.undoBtn,
-              isCompactLayout && styles.undoBtnCompact,
-              isTightLayout && styles.undoBtnTight,
-              !canUndo && styles.btnDisabled,
-            ]}
-            onPress={handleUndo}
-            disabled={!canUndo}
-          >
-            <Text style={[styles.undoBtnText, !canUndo && styles.textDisabled]}>
-              ↩ UNDO LAST STEP
-            </Text>
-          </Pressable>
-
           <View
             style={[
               styles.bottomRow,
@@ -717,14 +675,16 @@ export default function GameScreen() {
 
             <Pressable
               style={[
-                styles.largeResetBtn,
+                styles.largeUndoBtn,
                 isCompactLayout && styles.largeBtnCompact,
                 isTightLayout && styles.largeBtnTight,
+                !canUndo && styles.btnDisabled,
               ]}
-              onPress={resetGame}
+              onPress={handleUndo}
+              disabled={!canUndo}
             >
-              <Text style={[styles.largeResetText, isTightLayout && styles.bottomBtnTextTight]}>
-                RESET
+              <Text style={[styles.largeUndoText, !canUndo && styles.textDisabled]}>
+                ↩ UNDO LAST STEP
               </Text>
             </Pressable>
           </View>
@@ -849,8 +809,8 @@ const styles = StyleSheet.create({
     ...GAME_TYPOGRAPHY.button,
     color: GAME_SCENE.controls.text,
   },
-  largeResetBtn: {
-    flex: 1,
+  largeUndoBtn: {
+    flex: 1.5,
     height: 50,
     borderRadius: 16,
     backgroundColor: GAME_SCENE.controls.primaryBg,
@@ -864,7 +824,7 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
   },
-  largeResetText: {
+  largeUndoText: {
     ...GAME_TYPOGRAPHY.button,
     color: GAME_SCENE.controls.primaryText,
   },

@@ -157,43 +157,6 @@ function ExtrudedBlockItem({
         style={[styles.blockBottomBevel, { backgroundColor: darkBorderColor }]}
       />
 
-      {/* Inner cell dividers */}
-      {widthInCells > 1 &&
-        Array.from({ length: widthInCells - 1 }).map((_, idx) => (
-          <View
-            key={`vline-${idx}`}
-            pointerEvents="none"
-            style={[
-              styles.innerGridLineV,
-              {
-                left:
-                  (idx + 1) * (metrics.cellSize + metrics.gap) - metrics.gap / 2,
-              },
-            ]}
-          />
-        ))}
-      {heightInCells > 1 &&
-        Array.from({ length: heightInCells - 1 }).map((_, idx) => (
-          <View
-            key={`hline-${idx}`}
-            pointerEvents="none"
-            style={[
-              styles.innerGridLineH,
-              {
-                top:
-                  (idx + 1) * (metrics.cellSize + metrics.gap) - metrics.gap / 2,
-              },
-            ]}
-          />
-        ))}
-
-      {/* Block size label */}
-      <View pointerEvents="none" style={styles.blockLabelContainer}>
-        <Text style={styles.blockLabelText}>
-          {box.size > 1 ? `${widthInCells}×${heightInCells}` : ""}
-        </Text>
-      </View>
-
       {/* Direction hints when block is active/selected */}
       {isSelected && isOwned && !disabled && (
         <>
@@ -242,7 +205,7 @@ export function GridBoard({
   onExtrude,
   disabled,
   activePlayer,
-  player1ColorHex = "#3B82F6",
+  player1ColorHex = "#2563EB",
   player2ColorHex = "#EF4444",
   availableHeight,
   layoutDensity = "normal",
@@ -509,36 +472,6 @@ const styles = StyleSheet.create({
     borderBottomLeftRadius: 8,
     borderBottomRightRadius: 8,
     opacity: 0.35,
-  },
-  innerGridLineV: {
-    position: "absolute",
-    top: 0,
-    bottom: 0,
-    width: 1,
-    backgroundColor: "rgba(255, 255, 255, 0.4)",
-    zIndex: 2,
-  },
-  innerGridLineH: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    height: 1,
-    backgroundColor: "rgba(255, 255, 255, 0.4)",
-    zIndex: 2,
-  },
-  blockLabelContainer: {
-    zIndex: 5,
-    backgroundColor: "rgba(0, 0, 0, 0.22)",
-    paddingHorizontal: 5,
-    paddingVertical: 1,
-    borderRadius: 6,
-  },
-  blockLabelText: {
-    color: "#FFFFFF",
-    fontSize: 12,
-    fontWeight: "800",
-    textAlign: "center",
-    includeFontPadding: false,
   },
   directionHint: {
     position: "absolute",

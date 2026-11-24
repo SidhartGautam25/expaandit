@@ -759,13 +759,7 @@ export function useGameSession(options?: {
     historyStats: stats,
     clearHistory: clearStats,
     totalBoxes: board ? board.rows * board.cols : 0,
-    player1ColorHex:
-      config.player1Color === "black"
-        ? PLAYER_CAPTURE_COLORS.player2
-        : PLAYER_CAPTURE_COLORS.player1,
-    player2ColorHex:
-      config.player1Color === "black"
-        ? PLAYER_CAPTURE_COLORS.player1
-        : PLAYER_CAPTURE_COLORS.player2,
+    player1ColorHex: PLAYER_CAPTURE_COLORS.player1,
+    player2ColorHex: PLAYER_CAPTURE_COLORS.player2,
   };
 }
