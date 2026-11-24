@@ -1,12 +1,7 @@
-name: Build Android Preview
+name: Build Android APK
 
 on:
-  workflow_dispatch:
-  push:
-    branches:
-      - main
-      - dev
-      - tutorial-test
+  workflow_dispatch: # Allows manual trigger from GitHub UI
 
 jobs:
   build:
@@ -19,7 +14,6 @@ jobs:
           sudo rm -rf /usr/share/dotnet
           sudo rm -rf /opt/ghc
           sudo rm -rf /usr/local/share/boost
-          sudo rm -rf /usr/local/lib/android
           echo "Disk space after cleanup:"
           df -h
 
@@ -39,33 +33,25 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
-
       - name: Install Dependencies
         working-directory: android
-        run: npm ci --prefer-offline
+        run: npm ci
 
       - name: Prebuild Native Folders
         working-directory: android
         run: npx expo prebuild --platform android --no-install
 
-      - name: Build Preview APK
-        working-directory: android/android
+      - name: Build Debug APK
+        working-directory: android
         env:
-          GRADLE_OPTS: >-
-            -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g"
-            -Dorg.gradle.workers.max=4
-            -Dorg.gradle.daemon=false
-            -Dorg.gradle.parallel=true
-            -Dorg.gradle.caching=true
+          GRADLE_OPTS: -Dorg.gradle.jvmargs="-Xmx3072m -XX:MaxMetaspaceSize=512m" -Dorg.gradle.workers.max=2
         run: |
+          cd android
           chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon --max-workers=4 --build-cache
+          ./gradlew assembleDebug --no-daemon --max-workers 2
 
-      - name: Upload Preview APK Artifact
+      - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: app-preview-apk
-          path: android/android/app/build/outputs/apk/release/*.apk
-          retention-days: 7
+          name: app-debug-apk
+          path: android/android/app/build/outputs/apk/debug/app-debug.apk

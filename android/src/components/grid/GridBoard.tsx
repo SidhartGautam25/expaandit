@@ -15,6 +15,7 @@ import {
   fitBoardLayout,
   getBoardContentSize,
   getBoardMetrics,
+  createBoardMetrics,
   getCellLayout,
   BoardMetrics,
 } from "../../engine/board/boardLayout";
@@ -25,7 +26,7 @@ import {
   getBlockRect,
   ExtrudeDirection,
   TerritoryZone,
-} from "../../engine/gameEngine";
+} from "../../engine/extrusion/extrusionEngine";
 import { GAME_SCENE } from "../../constants/theme";
 import type { GameLayoutDensity } from "../../utils/gameLayoutDensity";
 
@@ -157,43 +158,6 @@ function ExtrudedBlockItem({
         style={[styles.blockBottomBevel, { backgroundColor: darkBorderColor }]}
       />
 
-      {/* Inner cell dividers */}
-      {widthInCells > 1 &&
-        Array.from({ length: widthInCells - 1 }).map((_, idx) => (
-          <View
-            key={`vline-${idx}`}
-            pointerEvents="none"
-            style={[
-              styles.innerGridLineV,
-              {
-                left:
-                  (idx + 1) * (metrics.cellSize + metrics.gap) - metrics.gap / 2,
-              },
-            ]}
-          />
-        ))}
-      {heightInCells > 1 &&
-        Array.from({ length: heightInCells - 1 }).map((_, idx) => (
-          <View
-            key={`hline-${idx}`}
-            pointerEvents="none"
-            style={[
-              styles.innerGridLineH,
-              {
-                top:
-                  (idx + 1) * (metrics.cellSize + metrics.gap) - metrics.gap / 2,
-              },
-            ]}
-          />
-        ))}
-
-      {/* Block size label */}
-      <View pointerEvents="none" style={styles.blockLabelContainer}>
-        <Text style={styles.blockLabelText}>
-          {box.size > 1 ? `${widthInCells}×${heightInCells}` : ""}
-        </Text>
-      </View>
-
       {/* Direction hints when block is active/selected */}
       {isSelected && isOwned && !disabled && (
         <>
@@ -242,7 +206,7 @@ export function GridBoard({
   onExtrude,
   disabled,
   activePlayer,
-  player1ColorHex = "#3B82F6",
+  player1ColorHex = "#2563EB",
   player2ColorHex = "#EF4444",
   availableHeight,
   layoutDensity = "normal",
@@ -253,11 +217,11 @@ export function GridBoard({
   const isTallBoard = board.rows > board.cols;
   const isTight = layoutDensity === "tight";
   const framePadding = isTight ? 1 : 2;
-  const maxBoardWidth = Math.min(screenWidth - (isTight ? 16 : 24), 450);
+  const maxBoardWidth = Math.min(screenWidth - (isTight ? 14 : 20), 460);
   const gridGap = isTallBoard ? (isTight ? 3 : 4) : isTight ? 4 : 5;
   const boardPadding = isTight ? 6 : 8;
-  const fallbackBoardHeight = Math.max(180, screenHeight - (isTight ? 220 : 310));
-  const heightSlack = isTight ? 2 : 6;
+  const fallbackBoardHeight = Math.max(200, screenHeight - (isTight ? 130 : 160));
+  const heightSlack = isTight ? 2 : 4;
   const maxBoardHeight =
     availableHeight && availableHeight > 80
       ? availableHeight - heightSlack
@@ -267,58 +231,25 @@ export function GridBoard({
     const innerMaxWidth = Math.max(40, maxBoardWidth - INNER_BORDER * 2);
     const innerMaxHeight = Math.max(40, maxBoardHeight - INNER_BORDER * 2);
 
-    const widthMetrics = getBoardMetrics(
-      innerMaxWidth,
-      board.cols,
-      board.rows,
-      boardPadding,
-      gridGap
+    // Dynamic adaptation for all smartphone screens:
+    // Box size dynamically adopts to the screen while keeping squares and fitting both dimensions:
+    const cellFromWidth = Math.floor(
+      (innerMaxWidth - boardPadding * 2 - (board.cols - 1) * gridGap) / board.cols
     );
-    const widthSize = getBoardContentSize(widthMetrics, board.cols, board.rows);
-    const widthBasedFits =
-      widthSize.width <= innerMaxWidth && widthSize.height <= innerMaxHeight;
+    const cellFromHeight = Math.floor(
+      (innerMaxHeight - boardPadding * 2 - (board.rows - 1) * gridGap) / board.rows
+    );
 
-    if (isTallBoard && widthBasedFits) {
-      return {
-        metrics: widthMetrics,
-        contentWidth: widthSize.width,
-        contentHeight: widthSize.height,
-      };
-    }
+    const cellSize = Math.max(16, Math.min(cellFromWidth, cellFromHeight));
+    const metrics = createBoardMetrics(cellSize, gridGap, boardPadding);
+    const size = getBoardContentSize(metrics, board.cols, board.rows);
 
-    if (
-      !isTallBoard &&
-      widthSize.width <= innerMaxWidth &&
-      widthSize.height <= innerMaxHeight
-    ) {
-      const square = Math.min(innerMaxWidth, innerMaxHeight);
-      const squareMetrics = getBoardMetrics(
-        square,
-        board.cols,
-        board.rows,
-        boardPadding,
-        gridGap
-      );
-      const squareSize = getBoardContentSize(squareMetrics, board.cols, board.rows);
-      return {
-        metrics: squareMetrics,
-        contentWidth: squareSize.width,
-        contentHeight: squareSize.height,
-      };
-    }
-
-    const fitted = fitBoardLayout(innerMaxWidth, innerMaxHeight, board.cols, board.rows, {
-      gap: gridGap,
-      padding: boardPadding,
-      preferWidthCellSize: isTallBoard,
-    });
     return {
-      metrics: fitted.metrics,
-      contentWidth: fitted.width,
-      contentHeight: fitted.height,
+      metrics,
+      contentWidth: size.width,
+      contentHeight: size.height,
     };
   }, [
-    isTallBoard,
     maxBoardHeight,
     maxBoardWidth,
     board.cols,
@@ -404,22 +335,7 @@ export function GridBoard({
                       onTileTap(r, c);
                     }
                   }}
-                >
-                  {/* Subtle spawnable indicator */}
-                  {isEmpty && canSpawnHere && !disabled && (
-                    <View
-                      style={[
-                        styles.spawnDot,
-                        {
-                          backgroundColor:
-                            activePlayer === 1
-                              ? player1ColorHex
-                              : player2ColorHex,
-                        },
-                      ]}
-                    />
-                  )}
-                </Pressable>
+                />
               );
             });
           })}
@@ -481,12 +397,6 @@ const styles = StyleSheet.create({
   spawnableCellGlow: {
     borderColor: "rgba(100, 116, 139, 0.45)",
   },
-  spawnDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 3.5,
-    opacity: 0.65,
-  },
   claimedBlock: {
     position: "absolute",
     borderRadius: 10,
@@ -509,36 +419,6 @@ const styles = StyleSheet.create({
     borderBottomLeftRadius: 8,
     borderBottomRightRadius: 8,
     opacity: 0.35,
-  },
-  innerGridLineV: {
-    position: "absolute",
-    top: 0,
-    bottom: 0,
-    width: 1,
-    backgroundColor: "rgba(255, 255, 255, 0.4)",
-    zIndex: 2,
-  },
-  innerGridLineH: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    height: 1,
-    backgroundColor: "rgba(255, 255, 255, 0.4)",
-    zIndex: 2,
-  },
-  blockLabelContainer: {
-    zIndex: 5,
-    backgroundColor: "rgba(0, 0, 0, 0.22)",
-    paddingHorizontal: 5,
-    paddingVertical: 1,
-    borderRadius: 6,
-  },
-  blockLabelText: {
-    color: "#FFFFFF",
-    fontSize: 12,
-    fontWeight: "800",
-    textAlign: "center",
-    includeFontPadding: false,
   },
   directionHint: {
     position: "absolute",

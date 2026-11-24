@@ -143,11 +143,17 @@ export function getBlockRect(box: GameBox): RectBounds {
   let r2 = -Infinity;
   let c2 = -Infinity;
 
-  for (const cell of box.cells) {
-    if (cell.row < r1) r1 = cell.row;
-    if (cell.row > r2) r2 = cell.row;
-    if (cell.col < c1) c1 = cell.col;
-    if (cell.col > c2) c2 = cell.col;
+  if (box && Array.isArray(box.cells)) {
+    for (const cell of box.cells) {
+      if (cell.row < r1) r1 = cell.row;
+      if (cell.row > r2) r2 = cell.row;
+      if (cell.col < c1) c1 = cell.col;
+      if (cell.col > c2) c2 = cell.col;
+    }
+  }
+
+  if (!isFinite(r1)) {
+    return { r1: 0, c1: 0, r2: 0, c2: 0 };
   }
 
   return { r1, c1, r2, c2 };
@@ -251,7 +257,7 @@ export function executeSpawn(
     owner: player,
     claimedBy: player,
     frozenBy: null,
-    baseColor: player === 1 ? "#3B82F6" : "#EF4444",
+    baseColor: player === 1 ? "#2563EB" : "#EF4444",
   };
 
   nextBoard.boxes[boxId] = newBox;
