@@ -25,7 +25,7 @@ import {
   getBlockRect,
   ExtrudeDirection,
   TerritoryZone,
-} from "../../engine/gameEngine";
+} from "../../engine/extrusion/extrusionEngine";
 import { GAME_SCENE } from "../../constants/theme";
 import type { GameLayoutDensity } from "../../utils/gameLayoutDensity";
 

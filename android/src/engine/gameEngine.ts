@@ -19,6 +19,8 @@ export {
   getRowTerritoryZone,
   canSpawnAt,
   canExpandBlock,
+  getBlockRect,
+  getTargetStrip,
   executeSpawn,
   executeExtrusion,
   getValidExtrudeDirections,
