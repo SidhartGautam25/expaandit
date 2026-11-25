@@ -4,6 +4,12 @@ export { COLORS, type ColorToken } from "./tokens";
 export { GAME_SCENE, type GamePanelVariant } from "./scene";
 export { GAME_FONT, GAME_TYPOGRAPHY } from "./gameTypography";
 export {
+  EXTRUSION_THEME,
+  PLAYER_1_PRIMARY,
+  PLAYER_2_PRIMARY,
+  getPlayerExtrusionTheme,
+} from "./extrusionTheme";
+export {
   PLAYER_CAPTURE_COLORS,
   RESERVED_CAPTURE_COLORS,
   getPlayerCaptureColor,

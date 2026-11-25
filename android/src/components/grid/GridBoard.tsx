@@ -27,6 +27,7 @@ import {
   ExtrudeDirection,
   TerritoryZone,
 } from "../../engine/extrusion/extrusionEngine";
+import { EXTRUSION_THEME } from "../../constants/theme/extrusionTheme";
 import { GAME_SCENE } from "../../constants/theme";
 import type { GameLayoutDensity } from "../../utils/gameLayoutDensity";
 
@@ -89,8 +90,8 @@ function ExtrudedBlockItem({
     heightInCells * metrics.cellSize + (heightInCells - 1) * metrics.gap;
 
   const isOwned = box.owner === activePlayer;
-  const blockColor = box.owner === 1 ? player1ColorHex : player2ColorHex;
-  const darkBorderColor = box.owner === 1 ? "#1E40AF" : "#991B1B";
+  const isP1 = box.owner === 1;
+  const playerTheme = isP1 ? EXTRUSION_THEME.player1 : EXTRUSION_THEME.player2;
 
   const hasExtrudedRef = useRef(false);
 
@@ -145,19 +146,13 @@ function ExtrudedBlockItem({
           top: boxTop,
           width: boxWidthPx,
           height: boxHeightPx,
-          backgroundColor: blockColor,
-          borderColor: isSelected ? "#FBBF24" : darkBorderColor,
-          borderWidth: isSelected ? 3 : 2,
+          backgroundColor: playerTheme.primary,
+          borderColor: isSelected ? "#F59E0B" : "transparent",
+          borderWidth: isSelected ? 2 : 0,
         },
       ]}
       {...blockPanResponder.panHandlers}
     >
-      {/* 3D Extrusion Bottom Shadow */}
-      <View
-        pointerEvents="none"
-        style={[styles.blockBottomBevel, { backgroundColor: darkBorderColor }]}
-      />
-
       {/* Direction hints when block is active/selected */}
       {isSelected && isOwned && !disabled && (
         <>
@@ -206,8 +201,8 @@ export function GridBoard({
   onExtrude,
   disabled,
   activePlayer,
-  player1ColorHex = "#2563EB",
-  player2ColorHex = "#EF4444",
+  player1ColorHex = EXTRUSION_THEME.player1.primary,
+  player2ColorHex = EXTRUSION_THEME.player2.primary,
   availableHeight,
   layoutDensity = "normal",
 }: GridBoardProps) {
@@ -217,9 +212,10 @@ export function GridBoard({
   const isTallBoard = board.rows > board.cols;
   const isTight = layoutDensity === "tight";
   const framePadding = isTight ? 1 : 2;
-  const maxBoardWidth = Math.min(screenWidth - (isTight ? 14 : 20), 460);
-  const gridGap = isTallBoard ? (isTight ? 3 : 4) : isTight ? 4 : 5;
-  const boardPadding = isTight ? 6 : 8;
+  const maxBoardWidth = Math.min(screenWidth - (isTight ? 12 : 16), 460);
+  // Extremely small hairline gap between boxes (Shikaku style):
+  const gridGap = isTight ? 2 : 2.5;
+  const boardPadding = isTight ? 3 : 4;
   const fallbackBoardHeight = Math.max(200, screenHeight - (isTight ? 130 : 160));
   const heightSlack = isTight ? 2 : 4;
   const maxBoardHeight =
@@ -288,20 +284,12 @@ export function GridBoard({
             const isNeutral = zone === "neutral";
             const isP1 = zone === "player1";
 
-            // Top three rows (0, 1, 2) are light Player 1 color
-            // Bottom three rows (3, 4, 5) are light Player 2 color
-            // Unlocked rows become crisp white
+            // Soothing territory tinting from variables (borderless)
             const cellBg = isNeutral
-              ? "#FFFFFF"
+              ? EXTRUSION_THEME.neutral.bg
               : isP1
-                ? "#EFF6FF" // light shade of Player 1
-                : "#FFF1F2"; // light shade of Player 2
-
-            const cellBorder = isNeutral
-              ? "#CBD5E1"
-              : isP1
-                ? "#BFDBFE"
-                : "#FECDD3";
+                ? EXTRUSION_THEME.player1.territoryBg
+                : EXTRUSION_THEME.player2.territoryBg;
 
             return Array.from({ length: board.cols }).map((__, c) => {
               const layout = getCellLayout(r, c, metrics);
@@ -320,7 +308,6 @@ export function GridBoard({
                       width: layout.width,
                       height: layout.height,
                       backgroundColor: cellBg,
-                      borderColor: cellBorder,
                     },
                     canSpawnHere && !disabled && styles.spawnableCellGlow,
                   ]}
@@ -366,20 +353,20 @@ export function GridBoard({
 
 const styles = StyleSheet.create({
   boardFrame: {
-    borderRadius: 20,
-    backgroundColor: GAME_SCENE.board.frameDark,
-    shadowColor: GAME_SCENE.board.shadow,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.16,
-    shadowRadius: 8,
-    elevation: 4,
+    borderRadius: 14,
+    backgroundColor: EXTRUSION_THEME.board.frameBg,
+    shadowColor: "#000000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 3,
     alignSelf: "center",
   },
   container: {
-    backgroundColor: "#F8FAFC",
-    borderRadius: 18,
+    backgroundColor: EXTRUSION_THEME.board.canvasBg,
+    borderRadius: 10,
     borderWidth: INNER_BORDER,
-    borderColor: GAME_SCENE.board.frame,
+    borderColor: EXTRUSION_THEME.board.borderColor,
     overflow: "hidden",
     justifyContent: "center",
     alignItems: "center",
@@ -389,36 +376,26 @@ const styles = StyleSheet.create({
   },
   gridCell: {
     position: "absolute",
-    borderRadius: 8,
-    borderWidth: 1.5,
+    borderRadius: EXTRUSION_THEME.board.cellRadius,
+    borderWidth: 0, // ZERO BORDER! Totally borderless as in Shikaku
     justifyContent: "center",
     alignItems: "center",
   },
   spawnableCellGlow: {
-    borderColor: "rgba(100, 116, 139, 0.45)",
+    opacity: 0.95,
   },
   claimedBlock: {
     position: "absolute",
-    borderRadius: 10,
+    borderRadius: EXTRUSION_THEME.board.blockRadius,
     justifyContent: "center",
     alignItems: "center",
     zIndex: 15,
-    shadowColor: "#000000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.22,
+    shadowColor: "#1A202C",
+    shadowOffset: { width: 0, height: 1.5 },
+    shadowOpacity: 0.14,
     shadowRadius: 3,
-    elevation: 3,
+    elevation: 2,
     overflow: "visible",
-  },
-  blockBottomBevel: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 4,
-    borderBottomLeftRadius: 8,
-    borderBottomRightRadius: 8,
-    opacity: 0.35,
   },
   directionHint: {
     position: "absolute",
