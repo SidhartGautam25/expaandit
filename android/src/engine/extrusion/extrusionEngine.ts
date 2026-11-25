@@ -294,7 +294,8 @@ export function executeExtrusion(
   addedCells: Coord[];
 } | null {
   const box = board.boxes[boxId];
-  if (!box || box.owner !== player) {
+  // Can be extruded by the owner, or if neutral (box.owner === null) by either player
+  if (!box || (box.owner !== player && box.owner !== null)) {
     return null;
   }
 
@@ -369,9 +370,9 @@ export function hasPlayerAnyLegalMove(
     }
   }
 
-  // 2. Check if any owned block can expand
+  // 2. Check if any owned or neutral block can expand
   for (const box of Object.values(board.boxes)) {
-    if (box.owner === player) {
+    if (box.owner === player || box.owner === null) {
       if (
         canExpandBlock(board, box, "up") ||
         canExpandBlock(board, box, "down") ||
@@ -465,6 +466,31 @@ export function getBotExtrusionMove(
           expansions.push({
             move: { type: "extrude", boxId: box.id, direction: dir, player: botPlayer },
             gain,
+            territoryBonus,
+            targetRow,
+          });
+        }
+      }
+    } else if (box.owner === null) {
+      // Neutral black block expansion: does not award score points directly (gain: 0),
+      // but can be used tactically to block opponent lanes
+      const directions: ExtrudeDirection[] = ["up", "down", "left", "right"];
+      for (const dir of directions) {
+        if (canExpandBlock(board, box, dir)) {
+          const strip = getTargetStrip(box, dir);
+          let territoryBonus = 0;
+          let targetRow = 0;
+          for (const c of strip) {
+            targetRow += c.row;
+            if (c.row <= Math.floor(board.rows / 2) - 1) {
+              territoryBonus += 1.5; // constrict Player 1 territory
+            }
+          }
+          targetRow /= strip.length;
+
+          expansions.push({
+            move: { type: "extrude", boxId: box.id, direction: dir, player: botPlayer },
+            gain: 0,
             territoryBonus,
             targetRow,
           });

@@ -498,7 +498,7 @@ export function useGameSession(options?: {
     if (!currentBoard) return false;
 
     const box = currentBoard.boxes[boxId];
-    if (!box || box.owner !== player) return false;
+    if (!box || (box.owner !== player && box.owner !== null)) return false;
 
     const whiteRows = currentBoard.unlockedWhiteRows ?? [];
     if (!canExpandBlock(currentBoard, box, direction)) {
@@ -660,7 +660,7 @@ export function useGameSession(options?: {
 
     const currentBoard = boardRef.current;
     const box = currentBoard.boxes[boxId];
-    if (!box || box.owner !== activePlayerRef.current) {
+    if (!box || (box.owner !== activePlayerRef.current && box.owner !== null)) {
       playGameSound("invalid");
       return false;
     }

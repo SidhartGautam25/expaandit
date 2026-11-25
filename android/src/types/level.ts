@@ -1,4 +1,5 @@
 import { BoxDefinition } from "./box";
+import { NeutralBlockDef } from "./campaignBlueprint";
 
 export interface CampaignLevel {
   id: string;
@@ -9,6 +10,8 @@ export interface CampaignLevel {
   rows: number;
   cols: number;
   boxes: BoxDefinition[];
+  /** Neutral black blocks present from the start of the level */
+  neutralBlocks?: NeutralBlockDef[];
   defaultTapsPerTurn: number;
   botDifficulty: number;
   /** Always show resource bar (even at 0) */

@@ -26,6 +26,11 @@ export const PLAYER_2_PILL_BG = "#FBEEF3";
 // ── NEUTRAL ZONE (Clean White) ──
 export const NEUTRAL_ZONE_BG = "#FFFFFF";
 
+// ── NEUTRAL BLACK / CHARCOAL BLOCK (Soothing Matte Slate / Charcoal) ──
+// Matches the soothing Shikaku puzzle aesthetic; usable by both players
+export const NEUTRAL_BLOCK_PRIMARY = "#252B36";
+export const NEUTRAL_BLOCK_TEXT = "#FFFFFF";
+
 // ── BOARD CANVAS & FRAME (Warm Soothing Neutral Stone) ──
 export const BOARD_FRAME_BG = "#ECE8E1";
 export const BOARD_CANVAS_BG = "#DFD9CE"; // Canvas color seen in the hairline 2.5px gaps
@@ -49,6 +54,10 @@ export const EXTRUSION_THEME = {
   },
   neutral: {
     bg: NEUTRAL_ZONE_BG,
+  },
+  neutralBlock: {
+    primary: NEUTRAL_BLOCK_PRIMARY,
+    text: NEUTRAL_BLOCK_TEXT,
   },
   board: {
     frameBg: BOARD_FRAME_BG,

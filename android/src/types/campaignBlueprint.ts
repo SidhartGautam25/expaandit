@@ -1,5 +1,13 @@
 import { BoxDefinition, BoxShapeType } from "./box";
 
+/** Definition of a neutral black block placed on the board initially */
+export interface NeutralBlockDef {
+  r1: number;
+  c1: number;
+  r2?: number;
+  c2?: number;
+}
+
 /** Declarative recipe for building a campaign stage — add new entries to extend the campaign. */
 export interface CampaignPlacement {
   id: string;
@@ -16,6 +24,8 @@ export interface CampaignBlueprint {
   rows: number;
   cols: number;
   botDifficulty: number;
+  /** Neutral black blocks present from the start of the level */
+  neutralBlocks?: NeutralBlockDef[];
   /** Multi-cell shapes placed before singles fill the rest. Omit for a classic uniform grid. */
   placements?: CampaignPlacement[];
   defaultTapsPerTurn?: number;

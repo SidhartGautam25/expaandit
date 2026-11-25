@@ -89,9 +89,14 @@ function ExtrudedBlockItem({
   const boxHeightPx =
     heightInCells * metrics.cellSize + (heightInCells - 1) * metrics.gap;
 
-  const isOwned = box.owner === activePlayer;
+  const isNeutral = box.owner === null;
+  const isOwned = box.owner === activePlayer || isNeutral;
   const isP1 = box.owner === 1;
-  const playerTheme = isP1 ? EXTRUSION_THEME.player1 : EXTRUSION_THEME.player2;
+  const blockColor = isNeutral
+    ? EXTRUSION_THEME.neutralBlock.primary
+    : isP1
+      ? EXTRUSION_THEME.player1.primary
+      : EXTRUSION_THEME.player2.primary;
 
   const hasExtrudedRef = useRef(false);
 
@@ -146,7 +151,7 @@ function ExtrudedBlockItem({
           top: boxTop,
           width: boxWidthPx,
           height: boxHeightPx,
-          backgroundColor: playerTheme.primary,
+          backgroundColor: blockColor,
           borderColor: isSelected ? "#F59E0B" : "transparent",
           borderWidth: isSelected ? 2 : 0,
         },
