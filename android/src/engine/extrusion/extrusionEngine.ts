@@ -2,6 +2,7 @@ import { GameBoard } from "../../types/board";
 import { GameBox, Coord } from "../../types/box";
 import { Player } from "../../types/game";
 import { cloneBoard } from "../board/boardFactory";
+import { PLAYER_1_PRIMARY, PLAYER_2_PRIMARY } from "../../constants/theme/extrusionTheme";
 
 export type ExtrudeDirection = "up" | "down" | "left" | "right";
 export type TerritoryZone = "player1" | "player2" | "neutral";
@@ -257,7 +258,7 @@ export function executeSpawn(
     owner: player,
     claimedBy: player,
     frozenBy: null,
-    baseColor: player === 1 ? "#2563EB" : "#EF4444",
+    baseColor: player === 1 ? PLAYER_1_PRIMARY : PLAYER_2_PRIMARY,
   };
 
   nextBoard.boxes[boxId] = newBox;

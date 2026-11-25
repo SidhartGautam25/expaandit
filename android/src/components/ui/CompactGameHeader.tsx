@@ -184,7 +184,7 @@ const styles = StyleSheet.create({
   scorePillP1: {
     backgroundColor: EXTRUSION_THEME.player1.pillBg,
     borderWidth: 1,
-    borderColor: "#D2E0F2",
+    borderColor: EXTRUSION_THEME.player1.cellBorder,
   },
   activeP1Border: {
     borderColor: EXTRUSION_THEME.player1.primary,
@@ -212,7 +212,7 @@ const styles = StyleSheet.create({
   scorePillP2: {
     backgroundColor: EXTRUSION_THEME.player2.pillBg,
     borderWidth: 1,
-    borderColor: "#F0D4DF",
+    borderColor: EXTRUSION_THEME.player2.cellBorder,
   },
   activeP2Border: {
     borderColor: EXTRUSION_THEME.player2.primary,

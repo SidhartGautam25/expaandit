@@ -92,11 +92,18 @@ function ExtrudedBlockItem({
   const isNeutral = box.owner === null;
   const isOwned = box.owner === activePlayer || isNeutral;
   const isP1 = box.owner === 1;
+
   const blockColor = isNeutral
     ? EXTRUSION_THEME.neutralBlock.primary
     : isP1
       ? EXTRUSION_THEME.player1.primary
       : EXTRUSION_THEME.player2.primary;
+
+  const blockBorderColor = isNeutral
+    ? EXTRUSION_THEME.neutralBlock.border
+    : isP1
+      ? EXTRUSION_THEME.player1.blockBorder
+      : EXTRUSION_THEME.player2.blockBorder;
 
   const hasExtrudedRef = useRef(false);
 
@@ -152,8 +159,8 @@ function ExtrudedBlockItem({
           width: boxWidthPx,
           height: boxHeightPx,
           backgroundColor: blockColor,
-          borderColor: isSelected ? "#F59E0B" : "transparent",
-          borderWidth: isSelected ? 2 : 0,
+          borderColor: isSelected ? "#F59E0B" : blockBorderColor,
+          borderWidth: isSelected ? 3 : 2.5,
         },
       ]}
       {...blockPanResponder.panHandlers}
@@ -218,9 +225,9 @@ export function GridBoard({
   const isTight = layoutDensity === "tight";
   const framePadding = isTight ? 1 : 2;
   const maxBoardWidth = Math.min(screenWidth - (isTight ? 12 : 16), 460);
-  // Extremely small hairline gap between boxes (Shikaku style):
-  const gridGap = isTight ? 2 : 2.5;
-  const boardPadding = isTight ? 3 : 4;
+  // Minimized tight gap between boxes to keep them close together:
+  const gridGap = isTight ? 1 : 1.2;
+  const boardPadding = isTight ? 2 : 2.5;
   const fallbackBoardHeight = Math.max(200, screenHeight - (isTight ? 130 : 160));
   const heightSlack = isTight ? 2 : 4;
   const maxBoardHeight =
@@ -289,12 +296,18 @@ export function GridBoard({
             const isNeutral = zone === "neutral";
             const isP1 = zone === "player1";
 
-            // Soothing territory tinting from variables (borderless)
+            // Soothing territory tinting with subtle matching blending borders
             const cellBg = isNeutral
               ? EXTRUSION_THEME.neutral.bg
               : isP1
                 ? EXTRUSION_THEME.player1.territoryBg
                 : EXTRUSION_THEME.player2.territoryBg;
+
+            const cellBorder = isNeutral
+              ? EXTRUSION_THEME.neutral.cellBorder
+              : isP1
+                ? EXTRUSION_THEME.player1.cellBorder
+                : EXTRUSION_THEME.player2.cellBorder;
 
             return Array.from({ length: board.cols }).map((__, c) => {
               const layout = getCellLayout(r, c, metrics);
@@ -313,6 +326,8 @@ export function GridBoard({
                       width: layout.width,
                       height: layout.height,
                       backgroundColor: cellBg,
+                      borderColor: cellBorder,
+                      borderWidth: 1.5,
                     },
                     canSpawnHere && !disabled && styles.spawnableCellGlow,
                   ]}
@@ -382,7 +397,7 @@ const styles = StyleSheet.create({
   gridCell: {
     position: "absolute",
     borderRadius: EXTRUSION_THEME.board.cellRadius,
-    borderWidth: 0, // ZERO BORDER! Totally borderless as in Shikaku
+    borderWidth: 1.5,
     justifyContent: "center",
     alignItems: "center",
   },
@@ -392,6 +407,7 @@ const styles = StyleSheet.create({
   claimedBlock: {
     position: "absolute",
     borderRadius: EXTRUSION_THEME.board.blockRadius,
+    borderWidth: 2.5,
     justifyContent: "center",
     alignItems: "center",
     zIndex: 15,
