@@ -14,25 +14,42 @@ import { TurnState } from "../../types/session";
 import {
   fitBoardLayout,
   getBoardContentSize,
-  getBoardMetrics,
-  createBoardMetrics,
   getCellLayout,
-  BoardMetrics,
+  type CellLayout,
 } from "../../engine/board/boardLayout";
 import {
-  getRowTerritoryZone,
+  findSubBoardForCell,
   getCellTerritoryZone,
   canSpawnAt,
   canExpandBlock,
   getBlockRect,
-  ExtrudeDirection,
-  TerritoryZone,
+  type ExtrudeDirection,
 } from "../../engine/extrusion/extrusionEngine";
-import { EXTRUSION_THEME, SUB_BOARD_THEMES } from "../../constants/theme/extrusionTheme";
-import { GAME_SCENE } from "../../constants/theme";
+import { EXTRUSION_THEME } from "../../constants/theme/extrusionTheme";
+import type { SubBoardConfig } from "../../types/campaignBlueprint";
 import type { GameLayoutDensity } from "../../utils/gameLayoutDensity";
 
-const INNER_BORDER = 1;
+function getSubBoardOffsets(
+  subBoards: readonly SubBoardConfig[],
+  start: "r1" | "c1",
+  end: "r2" | "c2",
+  extraGap: number
+) {
+  const offsets = new Map<SubBoardConfig, number>();
+
+  // Shift each sub-board as a unit so every tile inside keeps the same spacing.
+  for (const subBoard of [...subBoards].sort((a, b) => a[start] - b[start])) {
+    let offset = 0;
+    for (const [previous, previousOffset] of offsets) {
+      if (previous[end] < subBoard[start]) {
+        offset = Math.max(offset, previousOffset + extraGap);
+      }
+    }
+    offsets.set(subBoard, offset);
+  }
+
+  return offsets;
+}
 
 interface GridBoardProps {
   board: GameBoard;
@@ -56,7 +73,8 @@ interface GridBoardProps {
 interface ExtrudedBlockItemProps {
   box: GameBox;
   board: GameBoard;
-  metrics: BoardMetrics;
+  layout: CellLayout;
+  borderRadius: number;
   activePlayer: Player;
   disabled: boolean;
   player1ColorHex: string;
@@ -64,15 +82,13 @@ interface ExtrudedBlockItemProps {
   isSelected: boolean;
   onSelect: (boxId: string) => void;
   onExtrude?: (boxId: string, direction: ExtrudeDirection) => void;
-  getColOffset?: (col: number) => number;
-  getRowOffset?: (row: number) => number;
-  paddingTop?: number;
 }
 
 function ExtrudedBlockItem({
   box,
   board,
-  metrics,
+  layout,
+  borderRadius,
   activePlayer,
   disabled,
   player1ColorHex,
@@ -80,42 +96,15 @@ function ExtrudedBlockItem({
   isSelected,
   onSelect,
   onExtrude,
-  getColOffset,
-  getRowOffset,
-  paddingTop,
 }: ExtrudedBlockItemProps) {
-  const rect = getBlockRect(box);
-  const { r1, c1, r2, c2 } = rect;
-
-  const colOffset = getColOffset ? getColOffset(c1) : 0;
-  const rowOffset = getRowOffset ? getRowOffset(r1) : 0;
-  const topPad = paddingTop ?? metrics.padding;
-
-  const boxLeft =
-    metrics.padding + c1 * (metrics.cellSize + metrics.gap) + colOffset;
-  const boxTop = topPad + r1 * (metrics.cellSize + metrics.gap) + rowOffset;
-  const widthInCells = c2 - c1 + 1;
-  const heightInCells = r2 - r1 + 1;
-  const boxWidthPx =
-    widthInCells * metrics.cellSize + (widthInCells - 1) * metrics.gap;
-  const boxHeightPx =
-    heightInCells * metrics.cellSize + (heightInCells - 1) * metrics.gap;
-
   const isNeutral = box.owner === null;
   const isOwned = box.owner === activePlayer || isNeutral;
-  const isP1 = box.owner === 1;
 
   const blockColor = isNeutral
     ? EXTRUSION_THEME.neutralBlock.primary
-    : isP1
-      ? EXTRUSION_THEME.player1.primary
-      : EXTRUSION_THEME.player2.primary;
-
-  const blockBorderColor = isNeutral
-    ? EXTRUSION_THEME.neutralBlock.border
-    : isP1
-      ? EXTRUSION_THEME.player1.blockBorder
-      : EXTRUSION_THEME.player2.blockBorder;
+    : box.owner === 1
+      ? player1ColorHex
+      : player2ColorHex;
 
   const hasExtrudedRef = useRef(false);
 
@@ -165,14 +154,14 @@ function ExtrudedBlockItem({
     <View
       style={[
         styles.claimedBlock,
+        layout,
         {
-          left: boxLeft,
-          top: boxTop,
-          width: boxWidthPx,
-          height: boxHeightPx,
+          borderRadius,
           backgroundColor: blockColor,
-          borderColor: isSelected ? "#F59E0B" : blockBorderColor,
-          borderWidth: isSelected ? 3 : 2.5,
+          borderColor: isSelected
+            ? EXTRUSION_THEME.board.frameBg
+            : EXTRUSION_THEME.neutralBlock.border,
+          borderWidth: isSelected ? 2 : isNeutral ? 1 : 0,
         },
       ]}
       {...blockPanResponder.panHandlers}
@@ -233,18 +222,11 @@ export function GridBoard({
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const [selectedBoxId, setSelectedBoxId] = useState<string | null>(null);
 
-  const isTallBoard = board.rows > board.cols;
   const isTight = layoutDensity === "tight";
-  const isMultiSubBoard = Boolean(board.subBoards && board.subBoards.length > 1);
-  const framePadding = isTight ? 1 : 2;
+  const framePadding = isTight ? 8 : 12;
   const maxBoardWidth = Math.min(screenWidth - (isTight ? 12 : 16), 460);
-  // Minimized tight gap between boxes to keep them close together:
-  const gridGap = isTight ? 1 : 1.2;
-  const boardPadding = isTight ? 2 : 2.5;
-  const subBoardGapX = isMultiSubBoard ? (isTight ? 8 : 10) : 0;
-  const subBoardGapY = isMultiSubBoard ? (isTight ? 10 : 12) : 0;
-  const boardPaddingTop = isMultiSubBoard ? (isTight ? 20 : 24) : boardPadding;
-  const boardPaddingBottom = boardPadding;
+  const gridGap = isTight ? 3 : 4;
+  const extraSubBoardGap = gridGap * 3;
   const fallbackBoardHeight = Math.max(200, screenHeight - (isTight ? 130 : 160));
   const heightSlack = isTight ? 2 : 4;
   const maxBoardHeight =
@@ -252,280 +234,118 @@ export function GridBoard({
       ? availableHeight - heightSlack
       : fallbackBoardHeight;
 
-  const { getColOffset, getRowOffset, totalExtraWidth, totalExtraHeight } =
-    useMemo(() => {
-      if (!isMultiSubBoard || !board.subBoards) {
-        return {
-          getColOffset: () => 0,
-          getRowOffset: () => 0,
-          totalExtraWidth: 0,
-          totalExtraHeight: 0,
-        };
-      }
-
-      const uniqueC1 = Array.from(new Set(board.subBoards.map((s) => s.c1))).sort(
-        (a, b) => a - b
-      );
-      const uniqueR1 = Array.from(new Set(board.subBoards.map((s) => s.r1))).sort(
-        (a, b) => a - b
-      );
-
-      const getColOffset = (col: number) => {
-        let count = 0;
-        for (let i = 1; i < uniqueC1.length; i++) {
-          if (col >= uniqueC1[i]) count++;
-        }
-        return count * subBoardGapX;
-      };
-
-      const getRowOffset = (row: number) => {
-        let count = 0;
-        for (let i = 1; i < uniqueR1.length; i++) {
-          if (row >= uniqueR1[i]) count++;
-        }
-        return count * subBoardGapY;
-      };
-
-      const totalExtraWidth = Math.max(0, uniqueC1.length - 1) * subBoardGapX;
-      const totalExtraHeight = Math.max(0, uniqueR1.length - 1) * subBoardGapY;
-
-      return { getColOffset, getRowOffset, totalExtraWidth, totalExtraHeight };
-    }, [isMultiSubBoard, board.subBoards, subBoardGapX, subBoardGapY]);
-
-  const { metrics, contentWidth, contentHeight } = useMemo(() => {
-    const innerMaxWidth = Math.max(40, maxBoardWidth - INNER_BORDER * 2);
-    const innerMaxHeight = Math.max(40, maxBoardHeight - INNER_BORDER * 2);
-
-    // Dynamic adaptation for all smartphone screens:
-    // Box size dynamically adopts to the screen while keeping squares and fitting both dimensions:
-    const cellFromWidth = Math.floor(
-      (innerMaxWidth - boardPadding * 2 - (board.cols - 1) * gridGap - totalExtraWidth) /
-        board.cols
-    );
-    const cellFromHeight = Math.floor(
-      (innerMaxHeight - boardPaddingTop - boardPaddingBottom - (board.rows - 1) * gridGap - totalExtraHeight) /
-        board.rows
-    );
-
-    const cellSize = Math.max(16, Math.min(cellFromWidth, cellFromHeight));
-    const metrics = createBoardMetrics(cellSize, gridGap, boardPadding);
-    const baseSize = getBoardContentSize(metrics, board.cols, board.rows);
-    const contentWidth = baseSize.width + totalExtraWidth;
-    const contentHeight =
-      boardPaddingTop +
-      boardPaddingBottom +
-      board.rows * cellSize +
-      Math.max(board.rows - 1, 0) * gridGap +
-      totalExtraHeight;
-
+  const { columnOffsets, rowOffsets, extraWidth, extraHeight } = useMemo(() => {
+    const subBoards = board.subBoards ?? [];
+    const columnOffsets = getSubBoardOffsets(subBoards, "c1", "c2", extraSubBoardGap);
+    const rowOffsets = getSubBoardOffsets(subBoards, "r1", "r2", extraSubBoardGap);
     return {
-      metrics,
-      contentWidth,
-      contentHeight,
+      columnOffsets,
+      rowOffsets,
+      extraWidth: Math.max(0, ...columnOffsets.values()),
+      extraHeight: Math.max(0, ...rowOffsets.values()),
     };
-  }, [
-    maxBoardHeight,
-    maxBoardWidth,
+  }, [board.subBoards, extraSubBoardGap]);
+
+  const { metrics: fittedMetrics } = fitBoardLayout(
+    maxBoardWidth - framePadding * 2 - extraWidth,
+    maxBoardHeight - framePadding * 2 - extraHeight,
     board.cols,
     board.rows,
-    gridGap,
-    boardPadding,
-    boardPaddingTop,
-    boardPaddingBottom,
-    totalExtraWidth,
-    totalExtraHeight,
-  ]);
-
-  const boardWidth = contentWidth + INNER_BORDER * 2;
-  const boardHeight = contentHeight + INNER_BORDER * 2;
-
-  const whiteRows = useMemo(
-    () => board.unlockedWhiteRows ?? [],
-    [board.unlockedWhiteRows]
+    { padding: gridGap, gap: gridGap }
   );
+  const metrics = {
+    ...fittedMetrics,
+    cellSize: Math.max(16, Math.floor(fittedMetrics.cellSize)),
+  };
+  const { width, height } = getBoardContentSize(metrics, board.cols, board.rows);
+  const tileRadius = metrics.cellSize * EXTRUSION_THEME.board.tileRadiusRatio;
+  const cellStep = metrics.cellSize + metrics.gap;
+  const whiteRows = board.unlockedWhiteRows ?? [];
 
-  const boxes = useMemo(() => Object.values(board.boxes), [board.boxes]);
+  const getTileLayout = (row: number, col: number): CellLayout => {
+    const layout = getCellLayout(row, col, metrics);
+    if (columnOffsets.size <= 1) return layout;
+
+    const subBoard = findSubBoardForCell(board, row, col);
+    if (!subBoard) return layout;
+
+    return {
+      ...layout,
+      left: layout.left + (columnOffsets.get(subBoard) ?? 0),
+      top: layout.top + (rowOffsets.get(subBoard) ?? 0),
+    };
+  };
 
   return (
     <View style={[styles.boardFrame, { padding: framePadding }]}>
       <View
         style={[
           styles.container,
-          { width: boardWidth, height: boardHeight },
-          isMultiSubBoard && { backgroundColor: EXTRUSION_THEME.board.trayBg },
+          { width: width + extraWidth, height: height + extraHeight },
         ]}
       >
-        <View
-          style={[
-            styles.contentLayer,
-            { width: contentWidth, height: contentHeight },
-          ]}
-        >
-          {/* Sub-board frames and identifier badges */}
-          <View style={StyleSheet.absoluteFill} pointerEvents="none">
-            {isMultiSubBoard &&
-              board.subBoards?.map((sb, idx) => {
-                const sbCols = sb.c2 - sb.c1 + 1;
-                const sbRows = sb.r2 - sb.r1 + 1;
-                const theme = SUB_BOARD_THEMES[idx % SUB_BOARD_THEMES.length];
-                const left =
-                  metrics.padding +
-                  sb.c1 * (metrics.cellSize + metrics.gap) +
-                  getColOffset(sb.c1) -
-                  2;
-                const top =
-                  boardPaddingTop +
-                  sb.r1 * (metrics.cellSize + metrics.gap) +
-                  getRowOffset(sb.r1) -
-                  2;
-                const width =
-                  sbCols * metrics.cellSize + (sbCols - 1) * metrics.gap + 4;
-                const height =
-                  sbRows * metrics.cellSize + (sbRows - 1) * metrics.gap + 4;
+        {Array.from({ length: board.rows }, (_, row) =>
+          Array.from({ length: board.cols }, (_, col) => {
+            if (board.cellMap[row]?.[col] !== null) return null;
 
-                const badgeTop = Math.max(2, top - (isTight ? 16 : 19));
-                const arenaName = (sb.name ?? `Arena ${idx + 1}`).toUpperCase();
-                const badgeText = `${theme.tag} · ${arenaName}`;
+            const zone = getCellTerritoryZone(
+              board,
+              row,
+              col,
+              board.unlockedWhiteCells,
+              whiteRows
+            );
+            if (zone === "void") return null;
 
-                return (
-                  <React.Fragment key={`subboard-group-${sb.id}`}>
-                    {/* Sub-board Arena Card Frame */}
-                    <View
-                      style={[
-                        styles.subBoardCard,
-                        {
-                          left,
-                          top,
-                          width,
-                          height,
-                          borderColor: theme.borderColor,
-                          backgroundColor: theme.cardBg,
-                        },
-                      ]}
-                    />
-
-                    {/* Sub-board Identifier Header Badge */}
-                    <View
-                      style={[
-                        styles.subBoardBadge,
-                        {
-                          left: left + 2,
-                          top: badgeTop,
-                          maxWidth: width,
-                          backgroundColor: theme.badgeBg,
-                          borderColor: theme.badgeBorder,
-                        },
-                      ]}
-                    >
-                      <View
-                        style={[
-                          styles.subBoardBadgeDot,
-                          { backgroundColor: theme.borderColor },
-                        ]}
-                      />
-                      <Text
-                        style={[
-                          styles.subBoardBadgeText,
-                          { color: theme.badgeText },
-                        ]}
-                        numberOfLines={1}
-                      >
-                        {badgeText}
-                      </Text>
-                    </View>
-                  </React.Fragment>
-                );
-              })}
-          </View>
-
-          {/* 1. Grid Cells with Territory Tinting */}
-          {Array.from({ length: board.rows }).map((_, r) => {
-            return Array.from({ length: board.cols }).map((__, c) => {
-              const zone = getCellTerritoryZone(
-                board,
-                r,
-                c,
-                board.unlockedWhiteCells,
-                whiteRows
-              );
-              if (zone === "void") return null;
-
-              const isNeutral = zone === "neutral";
-              const isP1 = zone === "player1";
-
-              // Soothing territory tinting with subtle matching blending borders
-              const cellBg = isNeutral
+            const cellBg =
+              zone === "neutral"
                 ? EXTRUSION_THEME.neutral.bg
-                : isP1
-                  ? EXTRUSION_THEME.player1.territoryBg
-                  : EXTRUSION_THEME.player2.territoryBg;
+                : EXTRUSION_THEME[zone].territoryBg;
+            const layout = getTileLayout(row, col);
+            const canSpawnHere = canSpawnAt(
+              board,
+              row,
+              col,
+              activePlayer,
+              whiteRows,
+              board.unlockedWhiteCells
+            );
 
-              const cellBorder = isNeutral
-                ? EXTRUSION_THEME.neutral.cellBorder
-                : isP1
-                  ? EXTRUSION_THEME.player1.cellBorder
-                  : EXTRUSION_THEME.player2.cellBorder;
+            return (
+              <Pressable
+                key={`cell-${row}-${col}`}
+                style={({ pressed }) => [
+                  styles.gridCell,
+                  layout,
+                  { backgroundColor: cellBg, borderRadius: tileRadius },
+                  pressed && styles.pressedCell,
+                ]}
+                disabled={disabled || !canSpawnHere}
+                onPress={() => {
+                  if (disabled || !canSpawnHere) return;
+                  setSelectedBoxId(null);
+                  (onSpawn ?? onTileTap)(row, col);
+                }}
+              />
+            );
+          })
+        )}
 
-              const cellLeft =
-                metrics.padding +
-                c * (metrics.cellSize + metrics.gap) +
-                getColOffset(c);
-              const cellTop =
-                boardPaddingTop +
-                r * (metrics.cellSize + metrics.gap) +
-                getRowOffset(r);
+        {Object.values(board.boxes).map((box) => {
+          const { r1, c1, r2, c2 } = getBlockRect(box);
+          const layout = getTileLayout(r1, c1);
 
-              const isEmpty = board.cellMap[r]?.[c] === null;
-              const canSpawnHere =
-                isEmpty &&
-                canSpawnAt(
-                  board,
-                  r,
-                  c,
-                  activePlayer,
-                  whiteRows,
-                  board.unlockedWhiteCells
-                );
-
-              return (
-                <Pressable
-                  key={`cell-bg-${r}-${c}`}
-                  style={[
-                    styles.gridCell,
-                    {
-                      left: cellLeft,
-                      top: cellTop,
-                      width: metrics.cellSize,
-                      height: metrics.cellSize,
-                      backgroundColor: cellBg,
-                      borderColor: cellBorder,
-                      borderWidth: 1.5,
-                    },
-                    canSpawnHere && !disabled && styles.spawnableCellGlow,
-                  ]}
-                  disabled={disabled || !canSpawnHere}
-                  onPress={() => {
-                    if (disabled || !canSpawnHere) return;
-                    setSelectedBoxId(null);
-                    // Normal single click creates a 1×1 block immediately!
-                    if (onSpawn) {
-                      onSpawn(r, c);
-                    } else {
-                      onTileTap(r, c);
-                    }
-                  }}
-                />
-              );
-            });
-          })}
-
-          {/* 2. Solid Claimed Blocks (Extruded Rectangles) */}
-          {boxes.map((box) => (
+          return (
             <ExtrudedBlockItem
               key={`block-${box.id}`}
               box={box}
               board={board}
-              metrics={metrics}
+              layout={{
+                ...layout,
+                width: layout.width + (c2 - c1) * cellStep,
+                height: layout.height + (r2 - r1) * cellStep,
+              }}
+              borderRadius={tileRadius}
               activePlayer={activePlayer}
               disabled={disabled}
               player1ColorHex={player1ColorHex}
@@ -535,12 +355,9 @@ export function GridBoard({
                 setSelectedBoxId((prev) => (prev === id ? null : id))
               }
               onExtrude={onExtrude}
-              getColOffset={getColOffset}
-              getRowOffset={getRowOffset}
-              paddingTop={boardPaddingTop}
             />
-          ))}
-        </View>
+          );
+        })}
       </View>
     </View>
   );
@@ -548,69 +365,39 @@ export function GridBoard({
 
 const styles = StyleSheet.create({
   boardFrame: {
-    borderRadius: 14,
+    borderRadius: 20,
     backgroundColor: EXTRUSION_THEME.board.frameBg,
-    shadowColor: "#000000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 6,
-    elevation: 3,
     alignSelf: "center",
   },
   container: {
     backgroundColor: EXTRUSION_THEME.board.canvasBg,
-    borderRadius: 10,
-    borderWidth: INNER_BORDER,
-    borderColor: EXTRUSION_THEME.board.borderColor,
     overflow: "hidden",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  contentLayer: {
-    position: "relative",
   },
   gridCell: {
     position: "absolute",
-    borderRadius: EXTRUSION_THEME.board.cellRadius,
-    borderWidth: 1.5,
-    justifyContent: "center",
-    alignItems: "center",
-    zIndex: 2,
   },
-  spawnableCellGlow: {
-    opacity: 0.95,
+  pressedCell: {
+    opacity: 0.8,
   },
   claimedBlock: {
     position: "absolute",
-    borderRadius: EXTRUSION_THEME.board.blockRadius,
-    borderWidth: 2.5,
     justifyContent: "center",
     alignItems: "center",
-    zIndex: 15,
-    shadowColor: "#1A202C",
-    shadowOffset: { width: 0, height: 1.5 },
-    shadowOpacity: 0.14,
-    shadowRadius: 3,
-    elevation: 2,
-    overflow: "visible",
+    zIndex: 1,
   },
   directionHint: {
     position: "absolute",
     width: 22,
     height: 22,
     borderRadius: 11,
-    backgroundColor: "#FBBF24",
+    backgroundColor: EXTRUSION_THEME.board.canvasBg,
+    borderColor: EXTRUSION_THEME.board.frameBg,
+    borderWidth: 1,
     justifyContent: "center",
     alignItems: "center",
-    zIndex: 25,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.3,
-    shadowRadius: 2,
-    elevation: 4,
   },
   hintArrow: {
-    color: "#78350F",
+    color: EXTRUSION_THEME.board.frameBg,
     fontSize: 11,
     fontWeight: "900",
     includeFontPadding: false,
@@ -632,43 +419,5 @@ const styles = StyleSheet.create({
     right: -12,
     top: "50%",
     transform: [{ translateY: -11 }],
-  },
-  subBoardCard: {
-    position: "absolute",
-    backgroundColor: "#FFFFFF",
-    borderRadius: EXTRUSION_THEME.board.cellRadius + 4,
-    borderWidth: 2.5,
-    zIndex: 0,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1.5 },
-    shadowOpacity: 0.08,
-    shadowRadius: 3,
-  },
-  subBoardBadge: {
-    position: "absolute",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 6,
-    paddingVertical: 1,
-    borderRadius: 8,
-    borderWidth: 1.2,
-    zIndex: 5,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.08,
-    shadowRadius: 2,
-  },
-  subBoardBadgeDot: {
-    width: 5,
-    height: 5,
-    borderRadius: 2.5,
-    marginRight: 4,
-  },
-  subBoardBadgeText: {
-    fontSize: 9,
-    fontWeight: "800",
-    letterSpacing: 0.3,
-    textTransform: "uppercase",
   },
 });
