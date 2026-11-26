@@ -16,7 +16,12 @@ export type { BotAction } from "./ai/aiEngine";
 export {
   computeInitialWhiteRows,
   computeUnlockedWhiteRows,
+  computeUnlockedWhiteState,
   getRowTerritoryZone,
+  getCellTerritoryZone,
+  getSubBoards,
+  findSubBoardForCell,
+  findSubBoardForBox,
   canSpawnAt,
   canExpandBlock,
   getBlockRect,

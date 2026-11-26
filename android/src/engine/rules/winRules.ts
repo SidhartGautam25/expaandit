@@ -19,8 +19,8 @@ export function checkWinCondition(
   const isFull = isBoardCompletelyFull(board) || occupiedCount >= totalCells;
 
   // Check if either or both players have legal moves
-  const p1CanMove = hasPlayerAnyLegalMove(board, 1, whiteRows);
-  const p2CanMove = hasPlayerAnyLegalMove(board, 2, whiteRows);
+  const p1CanMove = hasPlayerAnyLegalMove(board, 1, whiteRows, board.unlockedWhiteCells);
+  const p2CanMove = hasPlayerAnyLegalMove(board, 2, whiteRows, board.unlockedWhiteCells);
 
   let isOver = false;
   let winner: Player | "draw" | null = null;

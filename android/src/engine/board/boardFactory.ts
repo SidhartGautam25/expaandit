@@ -1,8 +1,9 @@
 import { GameBoard } from "../../types/board";
-import { GameBox, BoxDefinition, getCaptureThreshold } from "../../types/box";
+import { GameBox, BoxDefinition, getCaptureThreshold, Coord } from "../../types/box";
 import { CampaignLevel } from "../../types/level";
 import { cellsFromShape } from "./boxShapes";
 import { assignBoxColors, BOX_PALETTE } from "./boxColors";
+import { EXTRUSION_THEME } from "../../constants/theme/extrusionTheme";
 
 function findAnchor(cells: { row: number; col: number }[]): { row: number; col: number } {
   return cells.reduce((min, c) =>
@@ -39,9 +40,63 @@ export function createBoardFromLevel(
   const boxes: Record<string, GameBox> = {};
 
   // For Territorial Block-Extrusion Strategy Game:
-  // The grid starts completely empty of blocks!
+  // Neutral black blocks (starting from Level 5) act as interactive obstacles.
+  // Both players can extrude them, but they do NOT add points to either player's score.
+  if (level.neutralBlocks && level.neutralBlocks.length > 0) {
+    level.neutralBlocks.forEach((nb, index) => {
+      const r1 = Math.min(nb.r1, nb.r2 ?? nb.r1);
+      const r2 = Math.max(nb.r1, nb.r2 ?? nb.r1);
+      const c1 = Math.min(nb.c1, nb.c2 ?? nb.c1);
+      const c2 = Math.max(nb.c1, nb.c2 ?? nb.c1);
+
+      const cells: Coord[] = [];
+      for (let r = r1; r <= r2; r++) {
+        for (let c = c1; c <= c2; c++) {
+          if (r >= 0 && r < level.rows && c >= 0 && c < level.cols) {
+            cells.push({ row: r, col: c });
+          }
+        }
+      }
+
+      if (cells.length > 0) {
+        const boxId = `neutral-${level.campaignNumber}-${index}`;
+        const box: GameBox = {
+          id: boxId,
+          size: cells.length,
+          captureThreshold: cells.length,
+          cells,
+          anchor: { row: r1, col: c1 },
+          shape: cells.length === 1 ? "single" : "square",
+          count: cells.length,
+          owner: null,
+          claimedBy: null,
+          frozenBy: null,
+          baseColor: EXTRUSION_THEME.neutralBlock.primary,
+        };
+
+        boxes[boxId] = box;
+        for (const cell of cells) {
+          cellMap[cell.row][cell.col] = boxId;
+        }
+      }
+    });
+  }
+
   const initialWhiteRows: number[] =
     level.rows % 2 === 1 ? [Math.floor(level.rows / 2)] : [];
+
+  const initialWhiteCells: string[] = [];
+  if (level.subBoards && level.subBoards.length > 0) {
+    for (const sb of level.subBoards) {
+      const sbRows = sb.r2 - sb.r1 + 1;
+      if (sbRows % 2 === 1) {
+        const midRow = sb.r1 + Math.floor(sbRows / 2);
+        for (let c = sb.c1; c <= sb.c2; c++) {
+          initialWhiteCells.push(`${midRow},${c}`);
+        }
+      }
+    }
+  }
 
   return {
     rows: level.rows,
@@ -49,6 +104,8 @@ export function createBoardFromLevel(
     cellMap,
     boxes,
     unlockedWhiteRows: initialWhiteRows,
+    unlockedWhiteCells: initialWhiteCells,
+    subBoards: level.subBoards,
   };
 }
 
@@ -103,6 +160,8 @@ export function cloneBoard(board: GameBoard): GameBoard {
     cellMap,
     boxes,
     unlockedWhiteRows: board.unlockedWhiteRows ? [...board.unlockedWhiteRows] : undefined,
+    unlockedWhiteCells: board.unlockedWhiteCells ? [...board.unlockedWhiteCells] : undefined,
+    subBoards: board.subBoards,
   };
 }
 

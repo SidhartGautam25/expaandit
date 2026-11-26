@@ -2,11 +2,12 @@ import { Player } from "../../types/game";
 import { palette } from "./palette";
 import { COLORS } from "./tokens";
 import { lightenColor } from "./utils";
+import { PLAYER_1_PRIMARY, PLAYER_2_PRIMARY } from "./extrusionTheme";
 
-/** Fixed in-game capture colors for player territory */
+/** Fixed in-game capture colors for player territory (configured via extrusionTheme.ts) */
 export const PLAYER_CAPTURE_COLORS = {
-  player1: "#2563EB",
-  player2: "#EF4444",
+  player1: PLAYER_1_PRIMARY,
+  player2: PLAYER_2_PRIMARY,
 } as const;
 
 export const RESERVED_CAPTURE_COLORS = [

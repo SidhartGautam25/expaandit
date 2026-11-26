@@ -3,6 +3,7 @@ import { StyleSheet, View, Text } from "react-native";
 import { Player } from "../../types/game";
 import { GamifiedPanel } from "./GamifiedPanel";
 import { formatPercent } from "../../utils/formatting";
+import { EXTRUSION_THEME } from "../../constants/theme/extrusionTheme";
 
 interface CompactGameHeaderProps {
   levelNumber: number;
@@ -31,8 +32,8 @@ export function CompactGameHeader({
   isBotThinking,
   winner,
   gameMode,
-  player1ColorHex = "#2563EB",
-  player2ColorHex = "#EF4444",
+  player1ColorHex = EXTRUSION_THEME.player1.primary,
+  player2ColorHex = EXTRUSION_THEME.player2.primary,
 }: CompactGameHeaderProps) {
   const isBotMode = gameMode === "bot";
   const p1Percent = formatPercent(player1Score, totalBoxes);
@@ -181,59 +182,59 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   scorePillP1: {
-    backgroundColor: "#EFF6FF",
-    borderWidth: 1.5,
-    borderColor: "#BFDBFE",
+    backgroundColor: EXTRUSION_THEME.player1.pillBg,
+    borderWidth: 1,
+    borderColor: EXTRUSION_THEME.player1.cellBorder,
   },
   activeP1Border: {
-    borderColor: "#2563EB",
-    borderWidth: 2,
+    borderColor: EXTRUSION_THEME.player1.primary,
+    borderWidth: 1.5,
   },
   playerLabelP1: {
     fontSize: 10,
     fontWeight: "800",
-    color: "#1E40AF",
+    color: EXTRUSION_THEME.player1.text,
     includeFontPadding: false,
   },
   percentTextP1: {
     fontSize: 10,
     fontWeight: "700",
-    color: "#2563EB",
-    opacity: 0.85,
+    color: EXTRUSION_THEME.player1.primary,
+    opacity: 0.9,
     includeFontPadding: false,
   },
   scoreValP1: {
     fontSize: 15,
     fontWeight: "900",
-    color: "#1E40AF",
+    color: EXTRUSION_THEME.player1.text,
     includeFontPadding: false,
   },
   scorePillP2: {
-    backgroundColor: "#FFF1F2",
-    borderWidth: 1.5,
-    borderColor: "#FECDD3",
+    backgroundColor: EXTRUSION_THEME.player2.pillBg,
+    borderWidth: 1,
+    borderColor: EXTRUSION_THEME.player2.cellBorder,
   },
   activeP2Border: {
-    borderColor: "#EF4444",
-    borderWidth: 2,
+    borderColor: EXTRUSION_THEME.player2.primary,
+    borderWidth: 1.5,
   },
   playerLabelP2: {
     fontSize: 10,
     fontWeight: "800",
-    color: "#991B1B",
+    color: EXTRUSION_THEME.player2.text,
     includeFontPadding: false,
   },
   percentTextP2: {
     fontSize: 10,
     fontWeight: "700",
-    color: "#EF4444",
-    opacity: 0.85,
+    color: EXTRUSION_THEME.player2.primary,
+    opacity: 0.9,
     includeFontPadding: false,
   },
   scoreValP2: {
     fontSize: 15,
     fontWeight: "900",
-    color: "#991B1B",
+    color: EXTRUSION_THEME.player2.text,
     includeFontPadding: false,
   },
   vsCircle: {
