@@ -463,11 +463,12 @@ export function useGameSession(options?: {
     if (!currentBoard) return false;
 
     const whiteRows = currentBoard.unlockedWhiteRows ?? [];
-    if (!canSpawnAt(currentBoard, row, col, player, whiteRows)) {
+    const whiteCells = currentBoard.unlockedWhiteCells ?? [];
+    if (!canSpawnAt(currentBoard, row, col, player, whiteRows, whiteCells)) {
       return false;
     }
 
-    const spawnResult = executeSpawn(currentBoard, row, col, player, whiteRows);
+    const spawnResult = executeSpawn(currentBoard, row, col, player, whiteRows, whiteCells);
     if (!spawnResult) return false;
 
     playMoveSounds(true);
@@ -501,11 +502,12 @@ export function useGameSession(options?: {
     if (!box || (box.owner !== player && box.owner !== null)) return false;
 
     const whiteRows = currentBoard.unlockedWhiteRows ?? [];
+    const whiteCells = currentBoard.unlockedWhiteCells ?? [];
     if (!canExpandBlock(currentBoard, box, direction)) {
       return false;
     }
 
-    const result = executeExtrusion(currentBoard, boxId, direction, player, whiteRows);
+    const result = executeExtrusion(currentBoard, boxId, direction, player, whiteRows, whiteCells);
     if (!result) return false;
 
     playMoveSounds(true);

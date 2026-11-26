@@ -40,7 +40,52 @@ export const NEUTRAL_BLOCK_TEXT = "#FFFFFF";
 // ── BOARD CANVAS & FRAME (Warm Soothing Neutral Stone / Paper) ──
 export const BOARD_FRAME_BG = "#F5EFE6";
 export const BOARD_CANVAS_BG = "#EAE3D6";
+export const BOARD_TRAY_BG = "#E5DDD0"; // Warmer, richer neutral tray background for multi-board levels
 export const BOARD_BORDER_COLOR = "#DDD5C7";
+
+// ── SUB-BOARD IDENTIFIER THEMES (Levels 11–20) ──
+// Distinct, soothing border colors and matching badge styles to make independent
+// sub-boards immediately recognizable and easily distinguishable from one another.
+export const SUB_BOARD_THEMES = [
+  {
+    tag: "A",
+    name: "Indigo",
+    borderColor: "#818CF8", // Distinct crisp border
+    badgeBg: "#EEF2FF",
+    badgeBorder: "#A5B4FC",
+    badgeText: "#4338CA",
+    cardBg: "#FFFFFF",
+  },
+  {
+    tag: "B",
+    name: "Teal",
+    borderColor: "#2DD4BF", // Distinct crisp border
+    badgeBg: "#F0FDFA",
+    badgeBorder: "#5EEAD4",
+    badgeText: "#0F766E",
+    cardBg: "#FFFFFF",
+  },
+  {
+    tag: "C",
+    name: "Amber",
+    borderColor: "#FBBF24", // Distinct crisp border
+    badgeBg: "#FFFBEB",
+    badgeBorder: "#FDE68A",
+    badgeText: "#B45309",
+    cardBg: "#FFFFFF",
+  },
+  {
+    tag: "D",
+    name: "Rose",
+    borderColor: "#FB7185", // Distinct crisp border
+    badgeBg: "#FFF1F2",
+    badgeBorder: "#FECDD3",
+    badgeText: "#BE123C",
+    cardBg: "#FFFFFF",
+  },
+] as const;
+
+export type SubBoardTheme = (typeof SUB_BOARD_THEMES)[number];
 
 /**
  * Structured Theme Token Object
@@ -74,10 +119,12 @@ export const EXTRUSION_THEME = {
   board: {
     frameBg: BOARD_FRAME_BG,
     canvasBg: BOARD_CANVAS_BG,
+    trayBg: BOARD_TRAY_BG,
     borderColor: BOARD_BORDER_COLOR,
     cellRadius: 7, // Restored original soft roundness
     blockRadius: 8,
   },
+  subBoards: SUB_BOARD_THEMES,
 } as const;
 
 export function getPlayerExtrusionTheme(player: Player) {

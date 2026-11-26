@@ -1,5 +1,5 @@
 import { BoxDefinition } from "./box";
-import { NeutralBlockDef } from "./campaignBlueprint";
+import { NeutralBlockDef, SubBoardConfig } from "./campaignBlueprint";
 
 export interface CampaignLevel {
   id: string;
@@ -10,6 +10,8 @@ export interface CampaignLevel {
   rows: number;
   cols: number;
   boxes: BoxDefinition[];
+  /** Independent sub-boards with their own territory zones and boundaries */
+  subBoards?: SubBoardConfig[];
   /** Neutral black blocks present from the start of the level */
   neutralBlocks?: NeutralBlockDef[];
   defaultTapsPerTurn: number;

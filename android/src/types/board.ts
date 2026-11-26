@@ -1,4 +1,5 @@
 import { GameBox } from "./box";
+import { SubBoardConfig } from "./campaignBlueprint";
 
 export interface GameBoard {
   rows: number;
@@ -8,6 +9,10 @@ export interface GameBoard {
   boxes: Record<string, GameBox>;
   /** Unlocked neutral (white) row indices */
   unlockedWhiteRows?: number[];
+  /** Set of unlocked neutral white cells (formatted as "r,c") */
+  unlockedWhiteCells?: string[];
+  /** Independent sub-boards when the board is divided into separate regions */
+  subBoards?: SubBoardConfig[];
 }
 
 export function getTotalBoxCount(board: GameBoard): number {

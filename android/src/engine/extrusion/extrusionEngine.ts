@@ -1,6 +1,7 @@
 import { GameBoard } from "../../types/board";
 import { GameBox, Coord } from "../../types/box";
 import { Player } from "../../types/game";
+import { SubBoardConfig } from "../../types/campaignBlueprint";
 import { cloneBoard } from "../board/boardFactory";
 import { PLAYER_1_PRIMARY, PLAYER_2_PRIMARY } from "../../constants/theme/extrusionTheme";
 
@@ -19,9 +20,57 @@ export interface RectBounds {
 }
 
 /**
- * Returns initial neutral (white) rows for a board.
- * If rows is odd (e.g. 5), the center row (index 2) is neutral from the start.
- * If rows is even (e.g. 6), there are no neutral rows initially (split at rows/2).
+ * Returns sub-boards for a board. If no sub-boards are configured (e.g. Levels 1–10),
+ * treats the whole board as a single independent sub-board spanning all rows and cols.
+ */
+export function getSubBoards(board: GameBoard): SubBoardConfig[] {
+  if (board.subBoards && board.subBoards.length > 0) {
+    return board.subBoards;
+  }
+  return [
+    {
+      id: "main",
+      name: "Main Arena",
+      r1: 0,
+      c1: 0,
+      r2: board.rows - 1,
+      c2: board.cols - 1,
+    },
+  ];
+}
+
+/**
+ * Finds which sub-board a given cell belongs to.
+ * Returns null if the cell lies in void space between sub-boards.
+ */
+export function findSubBoardForCell(
+  board: GameBoard,
+  row: number,
+  col: number
+): SubBoardConfig | null {
+  const subBoards = getSubBoards(board);
+  for (const sb of subBoards) {
+    if (row >= sb.r1 && row <= sb.r2 && col >= sb.c1 && col <= sb.c2) {
+      return sb;
+    }
+  }
+  return null;
+}
+
+/**
+ * Finds which sub-board a given block belongs to.
+ */
+export function findSubBoardForBox(
+  board: GameBoard,
+  box: GameBox
+): SubBoardConfig | null {
+  if (!box.cells || box.cells.length === 0) return null;
+  const c0 = box.cells[0];
+  return findSubBoardForCell(board, c0.row, c0.col);
+}
+
+/**
+ * Returns initial neutral (white) rows for a single board.
  */
 export function computeInitialWhiteRows(rows: number): number[] {
   if (rows % 2 === 1) {
@@ -31,7 +80,7 @@ export function computeInitialWhiteRows(rows: number): number[] {
 }
 
 /**
- * Returns the territory zone of a given row.
+ * Returns the territory zone of a given row on a classic uniform board.
  */
 export function getRowTerritoryZone(
   row: number,
@@ -58,66 +107,149 @@ export function getRowTerritoryZone(
 }
 
 /**
- * Computes all dynamically unlocked white rows based on how far
- * Player 1 has pushed down into Player 2's territory, and how far
- * Player 2 has pushed up into Player 1's territory.
+ * Determines the territory zone of any cell, respecting independent sub-boards.
+ * - Top half of sub-board: Player 1 territory.
+ * - Bottom half of sub-board: Player 2 territory.
+ * - Midline/invaded rows: Neutral white zone.
+ * - Cells outside any sub-board: "void".
  */
+export function getCellTerritoryZone(
+  board: GameBoard,
+  row: number,
+  col: number,
+  unlockedWhiteCells?: string[] | Set<string>,
+  unlockedWhiteRows?: number[] | Set<number>
+): TerritoryZone | "void" {
+  const sb = findSubBoardForCell(board, row, col);
+  if (!sb) return "void";
+
+  const key = `${row},${col}`;
+  if (unlockedWhiteCells) {
+    const cellSet = Array.isArray(unlockedWhiteCells)
+      ? new Set(unlockedWhiteCells)
+      : unlockedWhiteCells;
+    if (cellSet.has(key)) return "neutral";
+  }
+
+  if (!board.subBoards || board.subBoards.length <= 1) {
+    if (unlockedWhiteRows) {
+      const rowSet = Array.isArray(unlockedWhiteRows)
+        ? new Set(unlockedWhiteRows)
+        : unlockedWhiteRows;
+      if (rowSet.has(row)) return "neutral";
+    }
+  }
+
+  const sbRows = sb.r2 - sb.r1 + 1;
+  const relRow = row - sb.r1;
+
+  if (sbRows % 2 === 1 && relRow === Math.floor(sbRows / 2)) {
+    return "neutral";
+  }
+
+  return relRow < sbRows / 2 ? "player1" : "player2";
+}
+
+/**
+ * Computes dynamically unlocked white cells and rows across all sub-boards.
+ * When a player invades into the opponent's territory of an independent sub-board,
+ * the rows up to their furthest block in that sub-board turn neutral white!
+ */
+export function computeUnlockedWhiteState(
+  board: GameBoard,
+  previouslyUnlockedCells: string[] = [],
+  previouslyUnlockedRows: number[] = []
+): { unlockedWhiteRows: number[]; unlockedWhiteCells: string[] } {
+  const whiteCellSet = new Set<string>(previouslyUnlockedCells);
+  const whiteRowSet = new Set<number>(previouslyUnlockedRows);
+
+  const subBoards = getSubBoards(board);
+
+  for (const sb of subBoards) {
+    const sbRows = sb.r2 - sb.r1 + 1;
+    const isEven = sbRows % 2 === 0;
+    const p1BaseMax = sb.r1 + (isEven ? sbRows / 2 - 1 : Math.floor(sbRows / 2) - 1);
+    const p2BaseMin = sb.r1 + (isEven ? sbRows / 2 : Math.floor(sbRows / 2) + 1);
+
+    if (!isEven) {
+      const midRow = sb.r1 + Math.floor(sbRows / 2);
+      for (let c = sb.c1; c <= sb.c2; c++) {
+        whiteCellSet.add(`${midRow},${c}`);
+      }
+      whiteRowSet.add(midRow);
+    }
+
+    let maxP1Row = -1;
+    let minP2Row = sb.r2 + 1;
+
+    for (const box of Object.values(board.boxes)) {
+      if (box.owner === 1) {
+        for (const cell of box.cells) {
+          if (cell.col >= sb.c1 && cell.col <= sb.c2 && cell.row >= sb.r1 && cell.row <= sb.r2) {
+            if (cell.row > maxP1Row) maxP1Row = cell.row;
+          }
+        }
+      } else if (box.owner === 2) {
+        for (const cell of box.cells) {
+          if (cell.col >= sb.c1 && cell.col <= sb.c2 && cell.row >= sb.r1 && cell.row <= sb.r2) {
+            if (cell.row < minP2Row) minP2Row = cell.row;
+          }
+        }
+      }
+    }
+
+    // Player 1 invaded Player 2's territory of this sub-board
+    if (maxP1Row >= p2BaseMin) {
+      for (let r = p2BaseMin; r <= maxP1Row; r++) {
+        for (let c = sb.c1; c <= sb.c2; c++) {
+          whiteCellSet.add(`${r},${c}`);
+        }
+        whiteRowSet.add(r);
+      }
+    }
+
+    // Player 2 invaded Player 1's territory of this sub-board
+    if (minP2Row <= p1BaseMax) {
+      for (let r = minP2Row; r <= p1BaseMax; r++) {
+        for (let c = sb.c1; c <= sb.c2; c++) {
+          whiteCellSet.add(`${r},${c}`);
+        }
+        whiteRowSet.add(r);
+      }
+    }
+  }
+
+  return {
+    unlockedWhiteRows: Array.from(whiteRowSet).sort((a, b) => a - b),
+    unlockedWhiteCells: Array.from(whiteCellSet),
+  };
+}
+
 export function computeUnlockedWhiteRows(
   totalRows: number,
   board: GameBoard,
   previouslyUnlocked: number[] = []
 ): number[] {
-  const whiteSet = new Set<number>(previouslyUnlocked);
-
-  const isEven = totalRows % 2 === 0;
-  const p1BaseMax = isEven ? totalRows / 2 - 1 : Math.floor(totalRows / 2) - 1;
-  const p2BaseMin = isEven ? totalRows / 2 : Math.floor(totalRows / 2) + 1;
-
-  if (!isEven) {
-    whiteSet.add(Math.floor(totalRows / 2));
-  }
-
-  let maxP1Row = -1;
-  let minP2Row = totalRows;
-
-  for (const box of Object.values(board.boxes)) {
-    if (box.owner === 1) {
-      for (const cell of box.cells) {
-        if (cell.row > maxP1Row) maxP1Row = cell.row;
-      }
-    } else if (box.owner === 2) {
-      for (const cell of box.cells) {
-        if (cell.row < minP2Row) minP2Row = cell.row;
-      }
-    }
-  }
-
-  // Player 1 invaded Player 2's territory (rows >= p2BaseMin)
-  if (maxP1Row >= p2BaseMin) {
-    for (let r = p2BaseMin; r <= maxP1Row; r++) {
-      whiteSet.add(r);
-    }
-  }
-
-  // Player 2 invaded Player 1's territory (rows <= p1BaseMax)
-  if (minP2Row <= p1BaseMax) {
-    for (let r = minP2Row; r <= p1BaseMax; r++) {
-      whiteSet.add(r);
-    }
-  }
-
-  return Array.from(whiteSet).sort((a, b) => a - b);
+  const result = computeUnlockedWhiteState(
+    board,
+    board.unlockedWhiteCells ?? [],
+    previouslyUnlocked
+  );
+  return result.unlockedWhiteRows;
 }
 
 /**
  * Checks whether the given player is allowed to spawn a 1x1 block at (row, col).
+ * Core Rule: A player can only spawn in their own region (or neutral white zone).
+ * Players CANNOT click to spawn inside the opponent's territory!
  */
 export function canSpawnAt(
   board: GameBoard,
   row: number,
   col: number,
   player: Player,
-  unlockedWhiteRows: number[]
+  unlockedWhiteRows?: number[],
+  unlockedWhiteCells?: string[]
 ): boolean {
   if (row < 0 || row >= board.rows || col < 0 || col >= board.cols) {
     return false;
@@ -127,11 +259,16 @@ export function canSpawnAt(
     return false;
   }
 
-  const zone = getRowTerritoryZone(row, board.rows, unlockedWhiteRows);
+  const whiteCells = unlockedWhiteCells ?? board.unlockedWhiteCells;
+  const whiteRows = unlockedWhiteRows ?? board.unlockedWhiteRows;
+  const zone = getCellTerritoryZone(board, row, col, whiteCells, whiteRows);
+
+  if (zone === "void") return false;
   if (zone === "neutral") return true;
   if (player === 1 && zone === "player1") return true;
   if (player === 2 && zone === "player2") return true;
 
+  // Cannot spawn in opponent's territory
   return false;
 }
 
@@ -195,8 +332,8 @@ export function getTargetStrip(box: GameBox, direction: ExtrudeDirection): Coord
 
 /**
  * Checks if a block can expand in `direction`.
- * Critical rule: All target cells in the new edge strip must be within boundaries
- * and completely empty. If even one is blocked or out-of-bounds, expansion is illegal (no partial growth).
+ * Sub-board independence rule: All target cells must be within the SAME sub-board
+ * and completely empty. Expansion outside the sub-board boundary is illegal.
  */
 export function canExpandBlock(
   board: GameBoard,
@@ -206,17 +343,30 @@ export function canExpandBlock(
   const strip = getTargetStrip(box, direction);
   if (strip.length === 0) return false;
 
+  const sb = findSubBoardForBox(board, box);
+
   for (const cell of strip) {
-    // Boundary check
-    if (
-      cell.row < 0 ||
-      cell.row >= board.rows ||
-      cell.col < 0 ||
-      cell.col >= board.cols
-    ) {
-      return false;
+    if (sb) {
+      // Must stay strictly within the sub-board boundary
+      if (
+        cell.row < sb.r1 ||
+        cell.row > sb.r2 ||
+        cell.col < sb.c1 ||
+        cell.col > sb.c2
+      ) {
+        return false;
+      }
+    } else {
+      if (
+        cell.row < 0 ||
+        cell.row >= board.rows ||
+        cell.col < 0 ||
+        cell.col >= board.cols
+      ) {
+        return false;
+      }
     }
-    // Emptiness check (blocked by opponent or own separate block)
+    // Emptiness check (cannot expand into opponent or own separate blocks)
     if (board.cellMap[cell.row][cell.col] !== null) {
       return false;
     }
@@ -234,13 +384,15 @@ export function executeSpawn(
   row: number,
   col: number,
   player: Player,
-  unlockedWhiteRows: number[]
+  unlockedWhiteRows: number[] = [],
+  unlockedWhiteCells?: string[]
 ): {
   board: GameBoard;
   boxId: string;
   unlockedWhiteRows: number[];
+  unlockedWhiteCells: string[];
 } | null {
-  if (!canSpawnAt(board, row, col, player, unlockedWhiteRows)) {
+  if (!canSpawnAt(board, row, col, player, unlockedWhiteRows, unlockedWhiteCells)) {
     return null;
   }
 
@@ -264,17 +416,19 @@ export function executeSpawn(
   nextBoard.boxes[boxId] = newBox;
   nextBoard.cellMap[row][col] = boxId;
 
-  const nextWhiteRows = computeUnlockedWhiteRows(
-    nextBoard.rows,
+  const whiteState = computeUnlockedWhiteState(
     nextBoard,
+    nextBoard.unlockedWhiteCells ?? [],
     unlockedWhiteRows
   );
-  nextBoard.unlockedWhiteRows = nextWhiteRows;
+  nextBoard.unlockedWhiteRows = whiteState.unlockedWhiteRows;
+  nextBoard.unlockedWhiteCells = whiteState.unlockedWhiteCells;
 
   return {
     board: nextBoard,
     boxId,
-    unlockedWhiteRows: nextWhiteRows,
+    unlockedWhiteRows: whiteState.unlockedWhiteRows,
+    unlockedWhiteCells: whiteState.unlockedWhiteCells,
   };
 }
 
@@ -287,15 +441,17 @@ export function executeExtrusion(
   boxId: string,
   direction: ExtrudeDirection,
   player: Player,
-  unlockedWhiteRows: number[]
+  unlockedWhiteRows: number[] = [],
+  unlockedWhiteCells?: string[]
 ): {
   board: GameBoard;
   box: GameBox;
   unlockedWhiteRows: number[];
+  unlockedWhiteCells: string[];
   addedCells: Coord[];
 } | null {
   const box = board.boxes[boxId];
-  // Can be extruded by the owner, or if neutral (box.owner === null) by either player
+  // Can be extruded by owner, or if neutral (box.owner === null) by either player
   if (!box || (box.owner !== player && box.owner !== null)) {
     return null;
   }
@@ -328,17 +484,19 @@ export function executeExtrusion(
   }
   targetBox.anchor = { row: minR, col: minC };
 
-  const nextWhiteRows = computeUnlockedWhiteRows(
-    nextBoard.rows,
+  const whiteState = computeUnlockedWhiteState(
     nextBoard,
+    nextBoard.unlockedWhiteCells ?? [],
     unlockedWhiteRows
   );
-  nextBoard.unlockedWhiteRows = nextWhiteRows;
+  nextBoard.unlockedWhiteRows = whiteState.unlockedWhiteRows;
+  nextBoard.unlockedWhiteCells = whiteState.unlockedWhiteCells;
 
   return {
     board: nextBoard,
     box: targetBox,
-    unlockedWhiteRows: nextWhiteRows,
+    unlockedWhiteRows: whiteState.unlockedWhiteRows,
+    unlockedWhiteCells: whiteState.unlockedWhiteCells,
     addedCells: strip,
   };
 }
@@ -355,18 +513,24 @@ export function getValidExtrudeDirections(
 }
 
 /**
- * Checks if a player has any legal moves available (spawn or extrusion).
+ * Checks if a player has any legal moves available (spawn or extrusion on any sub-board).
  */
 export function hasPlayerAnyLegalMove(
   board: GameBoard,
   player: Player,
-  unlockedWhiteRows: number[]
+  unlockedWhiteRows: number[] = [],
+  unlockedWhiteCells?: string[]
 ): boolean {
-  // 1. Check if can spawn in any cell
-  for (let r = 0; r < board.rows; r++) {
-    for (let c = 0; c < board.cols; c++) {
-      if (canSpawnAt(board, r, c, player, unlockedWhiteRows)) {
-        return true;
+  const whiteCells = unlockedWhiteCells ?? board.unlockedWhiteCells;
+  const subBoards = getSubBoards(board);
+
+  // 1. Check if can spawn in any sub-board cell
+  for (const sb of subBoards) {
+    for (let r = sb.r1; r <= sb.r2; r++) {
+      for (let c = sb.c1; c <= sb.c2; c++) {
+        if (canSpawnAt(board, r, c, player, unlockedWhiteRows, whiteCells)) {
+          return true;
+        }
       }
     }
   }
@@ -389,13 +553,16 @@ export function hasPlayerAnyLegalMove(
 }
 
 /**
- * Returns whether all cells on the board are occupied.
+ * Returns whether all playable cells on all sub-boards are occupied.
  */
 export function isBoardCompletelyFull(board: GameBoard): boolean {
-  for (let r = 0; r < board.rows; r++) {
-    for (let c = 0; c < board.cols; c++) {
-      if (board.cellMap[r][c] === null) {
-        return false;
+  const subBoards = getSubBoards(board);
+  for (const sb of subBoards) {
+    for (let r = sb.r1; r <= sb.r2; r++) {
+      for (let c = sb.c1; c <= sb.c2; c++) {
+        if (board.cellMap[r][c] === null) {
+          return false;
+        }
       }
     }
   }
@@ -403,7 +570,7 @@ export function isBoardCompletelyFull(board: GameBoard): boolean {
 }
 
 /**
- * Computes exact count of captured grid cells for Player 1 and Player 2.
+ * Computes exact count of captured grid cells for Player 1 and Player 2 across all sub-boards.
  */
 export function computeExtrusionScores(board: GameBoard): {
   player1Score: number;
@@ -421,23 +588,28 @@ export function computeExtrusionScores(board: GameBoard): {
     }
   }
 
+  const subBoards = getSubBoards(board);
+  let totalPlayableCells = 0;
+  for (const sb of subBoards) {
+    totalPlayableCells += (sb.r2 - sb.r1 + 1) * (sb.c2 - sb.c1 + 1);
+  }
+
   return {
     player1Score,
     player2Score,
-    totalCells: board.rows * board.cols,
+    totalCells: totalPlayableCells > 0 ? totalPlayableCells : board.rows * board.cols,
   };
 }
 
 /**
- * Intelligent AI choice for Bot (Player 2).
+ * Intelligent AI choice for Bot (Player 2) across all sub-boards.
  */
 export function getBotExtrusionMove(
   board: GameBoard,
   botPlayer: Player = 2,
-  unlockedWhiteRows: number[],
+  unlockedWhiteRows: number[] = [],
   difficulty: number = 3
 ): ExtrusionMove | null {
-  const opponent: Player = botPlayer === 1 ? 2 : 1;
   const expansions: {
     move: ExtrusionMove;
     gain: number;
@@ -445,7 +617,7 @@ export function getBotExtrusionMove(
     targetRow: number;
   }[] = [];
 
-  // 1. Gather all legal expansions
+  // 1. Gather all legal expansions across all sub-boards
   for (const box of Object.values(board.boxes)) {
     if (box.owner === botPlayer) {
       const directions: ExtrudeDirection[] = ["up", "down", "left", "right"];
@@ -453,13 +625,15 @@ export function getBotExtrusionMove(
         if (canExpandBlock(board, box, dir)) {
           const strip = getTargetStrip(box, dir);
           const gain = strip.length;
-          // Territory bonus: pushing towards row 0 (Player 1 territory)
+          const sb = findSubBoardForBox(board, box);
+          const sbMid = sb ? sb.r1 + Math.floor((sb.r2 - sb.r1 + 1) / 2) : Math.floor(board.rows / 2);
+
           let territoryBonus = 0;
           let targetRow = 0;
           for (const c of strip) {
             targetRow += c.row;
-            if (c.row <= Math.floor(board.rows / 2) - 1) {
-              territoryBonus += 3; // pushing into opponent territory!
+            if (c.row < sbMid) {
+              territoryBonus += 3; // pushing into opponent's territory in that sub-board!
             }
           }
           targetRow /= strip.length;
@@ -473,18 +647,19 @@ export function getBotExtrusionMove(
         }
       }
     } else if (box.owner === null) {
-      // Neutral black block expansion: does not award score points directly (gain: 0),
-      // but can be used tactically to block opponent lanes
       const directions: ExtrudeDirection[] = ["up", "down", "left", "right"];
       for (const dir of directions) {
         if (canExpandBlock(board, box, dir)) {
           const strip = getTargetStrip(box, dir);
+          const sb = findSubBoardForBox(board, box);
+          const sbMid = sb ? sb.r1 + Math.floor((sb.r2 - sb.r1 + 1) / 2) : Math.floor(board.rows / 2);
+
           let territoryBonus = 0;
           let targetRow = 0;
           for (const c of strip) {
             targetRow += c.row;
-            if (c.row <= Math.floor(board.rows / 2) - 1) {
-              territoryBonus += 1.5; // constrict Player 1 territory
+            if (c.row < sbMid) {
+              territoryBonus += 1.5;
             }
           }
           targetRow /= strip.length;
@@ -500,23 +675,27 @@ export function getBotExtrusionMove(
     }
   }
 
-  // 2. Gather all legal spawns
+  // 2. Gather all legal spawns across all sub-boards
   const spawns: { move: ExtrusionMove; score: number }[] = [];
-  for (let r = 0; r < board.rows; r++) {
-    for (let c = 0; c < board.cols; c++) {
-      if (canSpawnAt(board, r, c, botPlayer, unlockedWhiteRows)) {
-        let score = 1;
-        // Prefer rows closer to the midline
-        const distToMid = Math.abs(r - Math.floor(board.rows / 2));
-        score += Math.max(0, 4 - distToMid);
-        // Prefer central columns for expansion room
-        const distToCenterCol = Math.abs(c - Math.floor(board.cols / 2));
-        score += Math.max(0, 3 - distToCenterCol);
+  const subBoards = getSubBoards(board);
+  for (const sb of subBoards) {
+    const sbMid = sb.r1 + Math.floor((sb.r2 - sb.r1 + 1) / 2);
+    const sbCenterCol = sb.c1 + Math.floor((sb.c2 - sb.c1 + 1) / 2);
 
-        spawns.push({
-          move: { type: "spawn", row: r, col: c, player: botPlayer },
-          score,
-        });
+    for (let r = sb.r1; r <= sb.r2; r++) {
+      for (let c = sb.c1; c <= sb.c2; c++) {
+        if (canSpawnAt(board, r, c, botPlayer, unlockedWhiteRows, board.unlockedWhiteCells)) {
+          let score = 1;
+          const distToMid = Math.abs(r - sbMid);
+          score += Math.max(0, 4 - distToMid);
+          const distToCenterCol = Math.abs(c - sbCenterCol);
+          score += Math.max(0, 3 - distToCenterCol);
+
+          spawns.push({
+            move: { type: "spawn", row: r, col: c, player: botPlayer },
+            score,
+          });
+        }
       }
     }
   }
@@ -525,16 +704,13 @@ export function getBotExtrusionMove(
     return null;
   }
 
-  // Sort expansions by total value: gain + territoryBonus
   expansions.sort((a, b) => b.gain * 2 + b.territoryBonus - (a.gain * 2 + a.territoryBonus));
   spawns.sort((a, b) => b.score - a.score);
 
-  // If no blocks or no expansions, spawn
   if (expansions.length === 0) {
     return spawns[0].move;
   }
 
-  // Blunder rate based on difficulty
   const blunderRoll = Math.random();
   const blunderThreshold = difficulty <= 1 ? 0.4 : difficulty <= 2 ? 0.2 : 0.05;
 
@@ -543,16 +719,13 @@ export function getBotExtrusionMove(
     return spawns[randomIdx].move;
   }
 
-  // Prefer high-gain expansion
   const bestExpansion = expansions[0];
   const bestSpawn = spawns[0];
 
-  // If best expansion gives 2+ cells or pushes territory, definitely expand
   if (bestExpansion.gain >= 2 || bestExpansion.territoryBonus > 0 || !bestSpawn) {
     return bestExpansion.move;
   }
 
-  // If board has few bot blocks (<= 1) and there's a strong spawn near midline, spawn
   const botBoxCount = Object.values(board.boxes).filter((b) => b.owner === botPlayer).length;
   if (botBoxCount <= 1 && bestSpawn.score >= 5) {
     return bestSpawn.move;

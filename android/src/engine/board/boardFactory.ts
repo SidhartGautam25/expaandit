@@ -85,12 +85,27 @@ export function createBoardFromLevel(
   const initialWhiteRows: number[] =
     level.rows % 2 === 1 ? [Math.floor(level.rows / 2)] : [];
 
+  const initialWhiteCells: string[] = [];
+  if (level.subBoards && level.subBoards.length > 0) {
+    for (const sb of level.subBoards) {
+      const sbRows = sb.r2 - sb.r1 + 1;
+      if (sbRows % 2 === 1) {
+        const midRow = sb.r1 + Math.floor(sbRows / 2);
+        for (let c = sb.c1; c <= sb.c2; c++) {
+          initialWhiteCells.push(`${midRow},${c}`);
+        }
+      }
+    }
+  }
+
   return {
     rows: level.rows,
     cols: level.cols,
     cellMap,
     boxes,
     unlockedWhiteRows: initialWhiteRows,
+    unlockedWhiteCells: initialWhiteCells,
+    subBoards: level.subBoards,
   };
 }
 
@@ -145,6 +160,8 @@ export function cloneBoard(board: GameBoard): GameBoard {
     cellMap,
     boxes,
     unlockedWhiteRows: board.unlockedWhiteRows ? [...board.unlockedWhiteRows] : undefined,
+    unlockedWhiteCells: board.unlockedWhiteCells ? [...board.unlockedWhiteCells] : undefined,
+    subBoards: board.subBoards,
   };
 }
 
