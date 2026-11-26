@@ -1,26 +1,23 @@
-import { useState, useRef, useEffect, useCallback } from "react";
-import { GameBoard, getTotalBoardPoints } from "../types/board";
-import { Player, GameStatus } from "../types/game";
-import { Coord } from "../types/box";
-import { TurnState, PlayerState, SessionSnapshot } from "../types/session";
-import { PowerId } from "../types/powers";
-import { CampaignLevel } from "../types/level";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import type { GameBoard } from "../types/board";
+import type { Player, GameStatus } from "../types/game";
+import type { Coord } from "../types/box";
+import type { TurnState, PlayerState, SessionSnapshot } from "../types/session";
+import type { PowerId } from "../types/powers";
+import type { CampaignLevel } from "../types/level";
 import {
   createBoardFromLevel,
   checkWinCondition,
-  getBoxAt,
-  hasPlayerAnyLegalMove,
-  canSpawnAt,
-  canExpandBlock,
-  executeSpawn,
-  executeExtrusion,
   computeExtrusionScores,
-  getBotExtrusionMove,
-  ExtrudeDirection,
+  executeExtrusionAction,
+  getExtrusionMoveOptions,
+  getExtrusionTurn,
+  type ExtrusionAction,
+  type ExtrudeDirection,
 } from "../engine/gameEngine";
-import { applyCaptureRewards, createInitialPlayerState } from "../engine/rewards/rewardEngine";
-import { executePower, getPowerDefinition } from "../registries/powerRegistry";
-import { getCampaignLevel } from "../registries/campaignLevels";
+import { planExtrusionTurn } from "../engine/ai/extrusionAi";
+import { createInitialPlayerState } from "../engine/rewards/rewardEngine";
+import { getCampaignLevel, getVisibleCampaignLevelByNumber } from "../registries/campaignLevels";
 import { getBotThinkDelayMs } from "../constants/levels";
 import { PLAYER_CAPTURE_COLORS } from "../constants/theme";
 import { createTurnState } from "./useTurnState";
@@ -35,8 +32,7 @@ import {
   loadSessionSnapshot,
   clearSessionSnapshot,
 } from "../services/sessionStorage";
-import { getTurnHighlightCoords, resolveTurnHighlightCoords } from "../utils/lastMove";
-import type { TurnMoveRecord } from "../utils/lastMove";
+import { getTurnHighlightCoords } from "../utils/lastMove";
 
 export function useGameSession(options?: {
   isResume?: boolean;
@@ -103,12 +99,10 @@ export function useGameSession(options?: {
   const activePlayerRef = useRef(activePlayer);
   const turnRef = useRef(turn);
   const playersRef = useRef(players);
-  const botTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const botPlanRef = useRef<{ board: GameBoard; moves: ExtrusionAction[] } | null>(null);
   const loadedSessionKeyRef = useRef<string | null>(null);
   const winnerRef = useRef<Player | "draw" | null>(null);
   const currentTurnMovesRef = useRef<Coord[]>([]);
-  const currentTurnMoveRecordsRef = useRef<TurnMoveRecord[]>([]);
-  const [isBotThinking, setIsBotThinking] = useState(false);
   const [initCheckToken, setInitCheckToken] = useState(0);
 
   const { timer, resetTimer } = useGameTimer(gameStatus);
@@ -135,7 +129,7 @@ export function useGameSession(options?: {
       setWinner(null);
       winnerRef.current = null;
       setGameStatus("playing");
-      const freshTurn = createTurnState(2);
+      const freshTurn = createTurnState(lvl.defaultTapsPerTurn);
       setTurn(freshTurn);
       turnRef.current = freshTurn;
       const freshPlayers = {
@@ -150,9 +144,8 @@ export function useGameSession(options?: {
       setLastPlayer1Moves([]);
       setLastPlayer2Moves([]);
       currentTurnMovesRef.current = [];
-      currentTurnMoveRecordsRef.current = [];
       setCurrentTurnMoves([]);
-      setIsBotThinking(false);
+      botPlanRef.current = null;
       clearHistory();
       resetTimer();
       loadedSessionKeyRef.current = `${lvl.id}:${activeGameMode}`;
@@ -163,7 +156,10 @@ export function useGameSession(options?: {
   );
 
   const restoreActiveSession = useCallback(async () => {
+    const sessionKey = `${activeLevelId}:${activeGameMode}`;
+    const pendingBoard = boardRef.current;
     const snap = await loadSessionSnapshot();
+    if (loadedSessionKeyRef.current !== sessionKey || boardRef.current !== pendingBoard) return;
     const targetLevel = getCampaignLevel(activeLevelId);
     const canRestore =
       snap &&
@@ -173,7 +169,9 @@ export function useGameSession(options?: {
 
     if (!canRestore) {
       if (snap) await clearSessionSnapshot();
-      initializeFromLevel(targetLevel);
+      if (loadedSessionKeyRef.current === sessionKey && boardRef.current === pendingBoard) {
+        initializeFromLevel(targetLevel);
+      }
       return;
     }
 
@@ -182,6 +180,7 @@ export function useGameSession(options?: {
     setActivePlayer(snap.activePlayer);
     activePlayerRef.current = snap.activePlayer;
     setScores(snap.scores);
+    winnerRef.current = snap.winner;
     setWinner(snap.winner);
     setGameStatus("playing");
     setTurn(snap.turn);
@@ -190,8 +189,8 @@ export function useGameSession(options?: {
     playersRef.current = snap.players;
     setLastPlayer1Moves(getTurnHighlightCoords(snap.lastPlayer1Moves || []));
     setLastPlayer2Moves(getTurnHighlightCoords(snap.lastPlayer2Moves || []));
-    setCurrentTurnMoves(snap.currentTurnMoves || []);
-    setIsBotThinking(false);
+    currentTurnMovesRef.current = snap.currentTurnMoves ?? [];
+    setCurrentTurnMoves(currentTurnMovesRef.current);
     clearHistory();
     resetTimer();
     loadedSessionKeyRef.current = `${activeLevelId}:${activeGameMode}`;
@@ -263,39 +262,35 @@ export function useGameSession(options?: {
     config.player1Color,
   ]);
 
-  useEffect(() => { boardRef.current = board; }, [board]);
-  useEffect(() => { activePlayerRef.current = activePlayer; }, [activePlayer]);
-  useEffect(() => { turnRef.current = turn; }, [turn]);
-  useEffect(() => { playersRef.current = players; }, [players]);
-  useEffect(() => { winnerRef.current = winner; }, [winner]);
-
-  useEffect(() => {
-    return () => {
-      if (botTimeoutRef.current) clearTimeout(botTimeoutRef.current);
-    };
-  }, []);
-
-  const makeSnapshot = useCallback(
-    (): SessionSnapshot => ({
-      board: boardRef.current!,
+  const makeSnapshot = useCallback((): SessionSnapshot => {
+    const currentBoard = boardRef.current!;
+    const { player1Score, player2Score } = computeExtrusionScores(currentBoard);
+    return {
+      board: currentBoard,
       activePlayer: activePlayerRef.current,
-      scores,
-      winner,
+      scores: { player1: player1Score, player2: player2Score },
+      winner: winnerRef.current,
       turn: turnRef.current,
       players: playersRef.current,
       lastBotMoves: activePlayerRef.current === 1 ? lastPlayer2Moves : lastPlayer1Moves,
-    }),
-    [scores, winner, lastPlayer1Moves, lastPlayer2Moves]
-  );
+      currentTurnMoves: currentTurnMovesRef.current,
+    };
+  }, [lastPlayer1Moves, lastPlayer2Moves]);
 
   const restoreSnapshot = useCallback((snap: SessionSnapshot) => {
+    botPlanRef.current = null;
     boardRef.current = snap.board;
+    activePlayerRef.current = snap.activePlayer;
+    winnerRef.current = snap.winner;
+    turnRef.current = snap.turn;
+    playersRef.current = snap.players;
+    currentTurnMovesRef.current = snap.currentTurnMoves ?? [];
+
     setBoard(snap.board);
     setActivePlayer(snap.activePlayer);
     setScores(snap.scores);
     setWinner(snap.winner);
     setTurn(snap.turn);
-    turnRef.current = snap.turn;
     setPlayers(snap.players);
     if (snap.activePlayer === 1) {
       setLastPlayer2Moves(getTurnHighlightCoords(snap.lastBotMoves));
@@ -304,419 +299,190 @@ export function useGameSession(options?: {
       setLastPlayer1Moves(getTurnHighlightCoords(snap.lastBotMoves));
       setLastPlayer2Moves([]);
     }
-    setCurrentTurnMoves([]);
-    if (snap.winner === null) setGameStatus("playing");
+    setCurrentTurnMoves(currentTurnMovesRef.current);
+    setGameStatus(snap.winner === null ? "playing" : "game_over");
   }, []);
 
-  const handleWinCheck = useCallback(
-    async (
-      nextBoard: GameBoard,
-      playerToCheck?: Player,
-      turnToCheck?: TurnState
-    ) => {
-      if (winnerRef.current !== null) return true;
+  const handleWinCheck = useCallback(async (nextBoard: GameBoard) => {
+    if (winnerRef.current !== null) return;
+    const outcome = checkWinCondition(nextBoard);
+    setScores((previous) =>
+      previous.player1 === outcome.player1Score && previous.player2 === outcome.player2Score
+        ? previous
+        : { player1: outcome.player1Score, player2: outcome.player2Score }
+    );
+    if (!outcome.isOver) return;
 
-      const winState = checkWinCondition(nextBoard, playerToCheck);
-      setScores((prev) =>
-        prev.player1 === winState.player1Score && prev.player2 === winState.player2Score
-          ? prev
-          : { player1: winState.player1Score, player2: winState.player2Score }
-      );
-
-      let outcome = winState;
-
-      if (
-        !outcome.isOver &&
-        playerToCheck !== undefined &&
-        !hasPlayerAnyLegalMove(nextBoard, playerToCheck, nextBoard.unlockedWhiteRows ?? [])
-      ) {
-        const opponent: Player = playerToCheck === 1 ? 2 : 1;
-        const opponentCanMove = hasPlayerAnyLegalMove(
-          nextBoard,
-          opponent,
-          nextBoard.unlockedWhiteRows ?? []
-        );
-        if (!opponentCanMove) {
-          let textWinner: Player | "draw" = "draw";
-          if (winState.player1Score > winState.player2Score) textWinner = 1;
-          else if (winState.player2Score > winState.player1Score) textWinner = 2;
-          outcome = { ...winState, isOver: true, winner: textWinner };
-        }
-      }
-
-      if (outcome.isOver) {
-        if (winnerRef.current !== null) return true;
-        winnerRef.current = outcome.winner;
-        setWinner(outcome.winner);
-        setGameStatus("game_over");
-        const totalBoardPoints = nextBoard.rows * nextBoard.cols;
-        await saveMatch({
-          winner: outcome.winner ?? "draw",
-          levelId: activeLevelId,
-          levelName: level.name || `Level ${level.campaignNumber}`,
-          gameMode: activeGameMode,
-          player1Score: outcome.player1Score,
-          player2Score: outcome.player2Score,
-          totalBoardPoints,
-        });
-        await clearSessionSnapshot();
-        if (
-          activeGameMode === "bot" &&
-          outcome.winner === 1 &&
-          level.campaignNumber > 0 &&
-          !level.hidden
-        ) {
-          await completeCampaignLevel(level.id);
-          const nextLevelNumber = level.campaignNumber + 1;
-          const nextLevelId = `campaign-${nextLevelNumber}`;
-          updateConfig({ campaignLevelId: nextLevelId });
-        }
-        return true;
-      }
-      return false;
-    },
-    [
-      saveMatch,
-      activeGameMode,
-      level.id,
-      level.campaignNumber,
-      level.hidden,
-      completeCampaignLevel,
-      updateConfig,
-    ]
-  );
+    winnerRef.current = outcome.winner;
+    setWinner(outcome.winner);
+    setGameStatus("game_over");
+    await saveMatch({
+      winner: outcome.winner ?? "draw",
+      levelId: activeLevelId,
+      levelName: level.name,
+      gameMode: activeGameMode,
+      player1Score: outcome.player1Score,
+      player2Score: outcome.player2Score,
+      totalBoardPoints: outcome.totalBoxes,
+    });
+    await clearSessionSnapshot();
+    if (
+      activeGameMode === "bot" && outcome.winner === 1 &&
+      level.campaignNumber > 0 && !level.hidden
+    ) {
+      await completeCampaignLevel(level.id);
+      const nextLevel = getVisibleCampaignLevelByNumber(level.campaignNumber + 1);
+      if (nextLevel) updateConfig({ campaignLevelId: nextLevel.id });
+    }
+  }, [saveMatch, activeLevelId, level, activeGameMode, completeCampaignLevel, updateConfig]);
 
   const handleWinCheckRef = useRef(handleWinCheck);
   handleWinCheckRef.current = handleWinCheck;
 
   useEffect(() => {
-    if (initCheckToken === 0) return;
-    const currentBoard = boardRef.current;
-    if (!currentBoard) return;
-    void handleWinCheckRef.current(
-      currentBoard,
-      activePlayerRef.current,
-      turnRef.current
-    );
+    if (initCheckToken > 0 && boardRef.current) {
+      void handleWinCheckRef.current(boardRef.current);
+    }
   }, [initCheckToken]);
 
-  const finishPlayerAction = async (
-    nextBoard: GameBoard,
-    player: Player
-  ): Promise<boolean> => {
-    let nextActive = activePlayerRef.current;
-    const remaining = turnRef.current.tapsRemaining - 1;
-    let nextTurn: TurnState;
-
-    if (remaining <= 0) {
-      nextActive = player === 1 ? 2 : 1;
-      const completedTurnMoves = resolveTurnHighlightCoords(
-        currentTurnMoveRecordsRef.current
-      );
-      if (player === 1) {
-        setLastPlayer1Moves(completedTurnMoves);
-        setLastPlayer2Moves([]);
-      } else {
-        setLastPlayer2Moves(completedTurnMoves);
-        setLastPlayer1Moves([]);
-      }
-      currentTurnMovesRef.current = [];
-      currentTurnMoveRecordsRef.current = [];
-      setCurrentTurnMoves([]);
-
-      nextTurn = createTurnState(2);
-      setActivePlayer(nextActive);
-      activePlayerRef.current = nextActive;
-      setTurn(nextTurn);
-      turnRef.current = nextTurn;
-    } else {
-      nextTurn = {
-        ...turnRef.current,
-        tapsRemaining: remaining,
-        normalTapUsedThisTurn: true,
-      };
-      setTurn(nextTurn);
-      turnRef.current = nextTurn;
-    }
-
-    const playerToCheck = remaining <= 0 ? nextActive : player;
-    const isOver = await handleWinCheck(nextBoard, playerToCheck, nextTurn);
-    if (isOver) return false;
-
-    if (activeGameMode === "bot" && nextActive === 2) {
-      if (turnRef.current.tapsRemaining === turnRef.current.tapsPerTurn) {
-        setLastPlayer2Moves([]);
-        pushSnapshot(makeSnapshot());
-      }
-      return true;
-    }
-
-    return false;
-  };
-
-  const executeSpawnInternal = async (
-    row: number,
-    col: number,
-    player: Player
-  ): Promise<boolean> => {
-    const currentBoard = boardRef.current;
-    if (!currentBoard) return false;
-
-    const whiteRows = currentBoard.unlockedWhiteRows ?? [];
-    const whiteCells = currentBoard.unlockedWhiteCells ?? [];
-    if (!canSpawnAt(currentBoard, row, col, player, whiteRows, whiteCells)) {
-      return false;
-    }
-
-    const spawnResult = executeSpawn(currentBoard, row, col, player, whiteRows, whiteCells);
-    if (!spawnResult) return false;
-
-    playMoveSounds(true);
-
-    const moveRecord: TurnMoveRecord = { row, col, tapCost: 1, kind: "tap" };
-    currentTurnMovesRef.current = [...currentTurnMovesRef.current, { row, col }];
-    currentTurnMoveRecordsRef.current = [
-      ...currentTurnMoveRecordsRef.current,
-      moveRecord,
-    ];
-    setCurrentTurnMoves(currentTurnMovesRef.current);
-
-    boardRef.current = spawnResult.board;
-    setBoard(spawnResult.board);
-
-    const newScores = computeExtrusionScores(spawnResult.board);
-    setScores({ player1: newScores.player1Score, player2: newScores.player2Score });
-
-    return await finishPlayerAction(spawnResult.board, player);
-  };
-
-  const executeExtrusionInternal = async (
-    boxId: string,
-    direction: ExtrudeDirection,
-    player: Player
-  ): Promise<boolean> => {
-    const currentBoard = boardRef.current;
-    if (!currentBoard) return false;
-
-    const box = currentBoard.boxes[boxId];
-    if (!box || (box.owner !== player && box.owner !== null)) return false;
-
-    const whiteRows = currentBoard.unlockedWhiteRows ?? [];
-    const whiteCells = currentBoard.unlockedWhiteCells ?? [];
-    if (!canExpandBlock(currentBoard, box, direction)) {
-      return false;
-    }
-
-    const result = executeExtrusion(currentBoard, boxId, direction, player, whiteRows, whiteCells);
-    if (!result) return false;
-
-    playMoveSounds(true);
-
-    for (const cell of result.addedCells) {
-      const moveRecord: TurnMoveRecord = { row: cell.row, col: cell.col, tapCost: 1, kind: "tap" };
-      currentTurnMovesRef.current = [...currentTurnMovesRef.current, cell];
-      currentTurnMoveRecordsRef.current = [
-        ...currentTurnMoveRecordsRef.current,
-        moveRecord,
-      ];
-    }
-    setCurrentTurnMoves(currentTurnMovesRef.current);
-
-    boardRef.current = result.board;
-    setBoard(result.board);
-
-    const newScores = computeExtrusionScores(result.board);
-    setScores({ player1: newScores.player1Score, player2: newScores.player2Score });
-
-    return await finishPlayerAction(result.board, player);
-  };
-
-  const scheduleBotTurn = useCallback(() => {
-    if (activeGameMode !== "bot") return;
-
-    const thinkDelayMs = getBotThinkDelayMs(level.botDifficulty);
-    setIsBotThinking(true);
-    if (botTimeoutRef.current) clearTimeout(botTimeoutRef.current);
-
-    botTimeoutRef.current = setTimeout(async () => {
-      let keepThinking = false;
-      try {
-        if (activePlayerRef.current !== 2 || winnerRef.current !== null) {
-          return;
-        }
-
-        const currentBoard = boardRef.current;
-        if (!currentBoard) return;
-
-        const botMove = getBotExtrusionMove(
-          currentBoard,
-          2,
-          currentBoard.unlockedWhiteRows ?? [],
-          level.botDifficulty
-        );
-
-        if (botMove) {
-          const shouldContinue =
-            botMove.type === "spawn"
-              ? await executeSpawnInternal(botMove.row, botMove.col, 2)
-              : await executeExtrusionInternal(botMove.boxId, botMove.direction, 2);
-
-          if (shouldContinue) {
-            keepThinking = true;
-            scheduleBotTurn();
-          } else if (
-            activePlayerRef.current === 2 &&
-            turnRef.current.tapsRemaining > 0
-          ) {
-            keepThinking = true;
-            scheduleBotTurn();
-          }
-        } else {
-          // If bot has no moves, check if game is over or pass turn
-          const blocked = await handleWinCheck(
-            currentBoard,
-            2,
-            turnRef.current
-          );
-          if (!blocked) {
-            setActivePlayer(1);
-            activePlayerRef.current = 1;
-            const freshTurn = createTurnState(2);
-            setTurn(freshTurn);
-            turnRef.current = freshTurn;
-          }
-        }
-      } catch (e) {
-        console.error("Bot failed:", e);
-      } finally {
-        if (!keepThinking) setIsBotThinking(false);
-      }
-    }, thinkDelayMs);
-  }, [activeGameMode, level.botDifficulty, handleWinCheck]);
-
-  useEffect(() => {
-    if (configLoading || !board || activeGameMode !== "bot") return;
-    if (gameStatus !== "playing" || winner !== null) return;
-    if (activePlayer !== 2 || isBotThinking) return;
-
-    const kickTimer = setTimeout(() => {
-      if (activePlayerRef.current !== 2) return;
-      if (winnerRef.current !== null) return;
-      scheduleBotTurn();
-    }, 150);
-
-    return () => clearTimeout(kickTimer);
-  }, [
-    activePlayer,
-    isBotThinking,
-    gameStatus,
-    winner,
-    board,
-    activeGameMode,
-    configLoading,
-    scheduleBotTurn,
-  ]);
-
-  const handleTileTap = async (row: number, col: number) => {
-    if (gameStatus !== "playing" || isBotThinking || !boardRef.current) return;
-    if (activeGameMode === "bot" && activePlayerRef.current !== 1) return;
-
+  const playAction = useCallback((action: ExtrusionAction, player: Player): GameBoard | null => {
     const currentBoard = boardRef.current;
     const currentTurn = turnRef.current;
-    const whiteRows = currentBoard.unlockedWhiteRows ?? [];
+    if (
+      !currentBoard || winnerRef.current !== null ||
+      player !== activePlayerRef.current || currentTurn.tapsRemaining <= 0
+    ) return null;
 
-    if (canSpawnAt(currentBoard, row, col, activePlayerRef.current, whiteRows)) {
-      if (activeGameMode === "pvp") {
-        pushSnapshot(makeSnapshot());
-      } else if (
-        activePlayerRef.current === 1 &&
-        currentTurn.tapsRemaining === currentTurn.tapsPerTurn
-      ) {
-        pushSnapshot(makeSnapshot());
-      }
+    const { mode } = getExtrusionTurn(
+      getExtrusionMoveOptions(currentBoard), player, currentTurn.forcedOpponentPlay
+    );
+    const result = executeExtrusionAction(currentBoard, action, player, mode);
+    if (!result) return null;
 
-      const shouldBotPlay = await executeSpawnInternal(
-        row,
-        col,
-        activePlayerRef.current
-      );
-
-      if (activeGameMode === "bot" && shouldBotPlay && gameStatus === "playing") {
-        scheduleBotTurn();
-      }
-      return;
-    }
-
-    const tappedBox = getBoxAt(currentBoard, row, col);
-    if (tappedBox && tappedBox.owner === activePlayerRef.current) {
-      playGameSound("tap");
-      return;
-    }
-
-    playGameSound("invalid");
-  };
-
-  const handleExtrude = async (boxId: string, direction: ExtrudeDirection): Promise<boolean> => {
-    if (gameStatus !== "playing" || isBotThinking || !boardRef.current) return false;
-    if (activeGameMode === "bot" && activePlayerRef.current !== 1) return false;
-
-    const currentBoard = boardRef.current;
-    const box = currentBoard.boxes[boxId];
-    if (!box || (box.owner !== activePlayerRef.current && box.owner !== null)) {
-      playGameSound("invalid");
-      return false;
-    }
-
-    if (!canExpandBlock(currentBoard, box, direction)) {
-      playGameSound("invalid");
-      return false;
-    }
-
-    const currentTurn = turnRef.current;
-    if (activeGameMode === "pvp") {
-      pushSnapshot(makeSnapshot());
-    } else if (
-      activePlayerRef.current === 1 &&
-      currentTurn.tapsRemaining === currentTurn.tapsPerTurn
+    if (
+      activeGameMode === "pvp" ||
+      (player === 1 && currentTurn.tapsRemaining === currentTurn.tapsPerTurn)
     ) {
       pushSnapshot(makeSnapshot());
     }
-
-    const shouldBotPlay = await executeExtrusionInternal(
-      boxId,
-      direction,
-      activePlayerRef.current
-    );
-
-    if (activeGameMode === "bot" && shouldBotPlay && gameStatus === "playing") {
-      scheduleBotTurn();
+    playMoveSounds(true);
+    const moves = [...currentTurnMovesRef.current, ...result.changedCells];
+    const remaining = currentTurn.tapsRemaining - 1;
+    if (remaining > 0) {
+      turnRef.current = {
+        ...currentTurn,
+        tapsRemaining: remaining,
+        normalTapUsedThisTurn: true,
+        forcedOpponentPlay: !!currentTurn.forcedOpponentPlay || mode !== "own",
+      };
+      currentTurnMovesRef.current = moves;
+    } else {
+      const highlights = getTurnHighlightCoords(moves);
+      setLastPlayer1Moves(player === 1 ? highlights : []);
+      setLastPlayer2Moves(player === 2 ? highlights : []);
+      activePlayerRef.current = player === 1 ? 2 : 1;
+      setActivePlayer(activePlayerRef.current);
+      turnRef.current = createTurnState(currentTurn.tapsPerTurn);
+      currentTurnMovesRef.current = [];
     }
 
-    return true;
+    boardRef.current = result.board;
+    setBoard(result.board);
+    setTurn(turnRef.current);
+    setCurrentTurnMoves(currentTurnMovesRef.current);
+    void handleWinCheckRef.current(result.board);
+    return result.board;
+  }, [activeGameMode, pushSnapshot, makeSnapshot]);
+
+  const isBotThinking = activeGameMode === "bot" && activePlayer === 2 &&
+    winner === null && gameStatus === "playing";
+
+  useEffect(() => {
+    if (configLoading || !isBotThinking || !board || turn.tapsRemaining <= 0) {
+      botPlanRef.current = null;
+      return;
+    }
+
+    let cancelled = false;
+    const isStale = () => cancelled || boardRef.current !== board ||
+      activePlayerRef.current !== 2 || winnerRef.current !== null;
+
+    const scheduleBotTurn = async () => {
+      if (isStale()) return;
+      let plan: ExtrusionAction[] = [];
+      try {
+        const retained = botPlanRef.current;
+        plan = retained?.board === board
+          ? retained.moves
+          : await planExtrusionTurn(board, 2, {
+              tapsRemaining: turn.tapsRemaining,
+              tapsPerTurn: turn.tapsPerTurn,
+              difficulty: level.botDifficulty,
+              forcedOpponentPlay: turn.forcedOpponentPlay,
+              isCancelled: isStale,
+            });
+      } catch (error) {
+        console.error("Bot search failed:", error);
+      }
+      if (isStale()) return;
+
+      const chosen = plan[0];
+      let nextBoard = chosen ? playAction(chosen, 2) : null;
+      if (!nextBoard) {
+        const { moves } = getExtrusionTurn(
+          getExtrusionMoveOptions(board), 2, turn.forcedOpponentPlay
+        );
+        nextBoard = moves[0] ? playAction(moves[0], 2) : null;
+        plan = [];
+      }
+      botPlanRef.current = nextBoard && plan.length > 1 && activePlayerRef.current === 2
+        ? { board: nextBoard, moves: plan.slice(1) }
+        : null;
+      if (!nextBoard) void handleWinCheckRef.current(board);
+    };
+
+    const timeout = setTimeout(() => void scheduleBotTurn(), getBotThinkDelayMs(level.botDifficulty));
+    return () => {
+      cancelled = true;
+      clearTimeout(timeout);
+    };
+  }, [board, turn, isBotThinking, configLoading, level.botDifficulty, playAction]);
+
+  const playHumanAction = (action: ExtrusionAction): boolean => {
+    const player = activePlayerRef.current;
+    if (gameStatus !== "playing" || (activeGameMode === "bot" && player !== 1)) return false;
+    const played = !!playAction(action, player);
+    if (!played) playGameSound("invalid");
+    return played;
   };
 
-  const handleSpawn = async (row: number, col: number): Promise<boolean> => {
-    await handleTileTap(row, col);
-    return true;
-  };
+  const handleTileTap = (row: number, col: number) => playHumanAction({ type: "spawn", row, col });
+  const handleSpawn = handleTileTap;
+  const handleTileLongPress = (row: number, col: number) =>
+    playHumanAction({ type: "spawn_green", row, col });
 
-  const handleTileLongPress = async (row: number, col: number) => {
-    // Unused in Extrusion mode
-  };
+  const handleExtrude = (boxId: string, direction: ExtrudeDirection) =>
+    playHumanAction({ type: "extrude", boxId, direction });
+
+  const handleMoveBlock = (boxId: string, direction: ExtrudeDirection) =>
+    playHumanAction({ type: "slide", boxId, direction });
+
+  const availableTurn = useMemo(() =>
+    board && winner === null && turn.tapsRemaining > 0
+      ? getExtrusionTurn(getExtrusionMoveOptions(board), activePlayer, turn.forcedOpponentPlay)
+      : null,
+  [board, activePlayer, turn, winner]);
 
   const activatePower = (powerId: PowerId) => {};
   const cancelPowerTargeting = () => {};
 
   const handleUndo = () => {
     if (!canUndo || isBotThinking) return;
-    if (botTimeoutRef.current) clearTimeout(botTimeoutRef.current);
-    setIsBotThinking(false);
     const snap = popSnapshot();
     if (snap) restoreSnapshot(snap);
   };
 
   const resetGame = () => {
-    if (botTimeoutRef.current) clearTimeout(botTimeoutRef.current);
     loadedSessionKeyRef.current = null;
     initializeFromLevel(getCampaignLevel(activeLevelId));
   };
@@ -748,6 +514,9 @@ export function useGameSession(options?: {
     handleTileTap,
     handleSpawn,
     handleExtrude,
+    handleMoveBlock,
+    legalMoves: availableTurn?.moves ?? [],
+    isForcedOpponentPlay: availableTurn !== null && availableTurn.mode !== "own",
     handleTileLongPress,
     activatePower,
     cancelPowerTargeting,
@@ -760,7 +529,7 @@ export function useGameSession(options?: {
     configLoading: configLoading || board === null,
     historyStats: stats,
     clearHistory: clearStats,
-    totalBoxes: board ? board.rows * board.cols : 0,
+    totalBoxes: board ? computeExtrusionScores(board).totalCells : 0,
     player1ColorHex: PLAYER_CAPTURE_COLORS.player1,
     player2ColorHex: PLAYER_CAPTURE_COLORS.player2,
   };

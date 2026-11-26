@@ -28,6 +28,7 @@ export interface BoxDefinition {
 
 export interface GameBox {
   id: string;
+  blockType?: "standard" | "neutral" | "movable_green";
   size: number;
   captureThreshold: number;
   cells: Coord[];

@@ -79,3 +79,11 @@ export function getBotThinkDelayMs(botDifficulty: number): number {
   if (botDifficulty <= 5) return 250;
   return 50;
 }
+
+/** Skill labels for the territorial extrusion campaign. */
+export function getExtrusionDifficultyName(difficulty: number): string {
+  if (difficulty <= 2) return "Novice";
+  if (difficulty <= 5) return "Tactician";
+  if (difficulty <= 7) return "Strategist";
+  return "Grandmaster";
+}

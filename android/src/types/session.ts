@@ -7,6 +7,8 @@ import { PlayerResources } from "./resources";
 export interface TurnState {
   tapsRemaining: number;
   tapsPerTurn: number;
+  /** Continues forced opponent play for this turn when the opponent has legal actions. */
+  forcedOpponentPlay?: boolean;
   firstTapCoord: Coord | null;
   firstTapBoxId: string | null;
   extraTapActive: boolean;
@@ -43,6 +45,7 @@ export interface SessionSnapshot {
   turn: TurnState;
   players: { player1: PlayerState; player2: PlayerState };
   lastBotMoves: Coord[];
+  currentTurnMoves?: Coord[];
 }
 
 export interface ActiveSessionSnapshot {

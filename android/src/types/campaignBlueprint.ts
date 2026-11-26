@@ -1,12 +1,10 @@
 import { BoxDefinition, BoxShapeType } from "./box";
 
-/** Definition of a neutral black block placed on the board initially */
-export interface NeutralBlockDef {
-  r1: number;
-  c1: number;
-  r2?: number;
-  c2?: number;
-}
+/** Black obstacles may span a rectangle. Green obstacles occupy one cell. */
+export type NeutralBlockDef = { r1: number; c1: number } & (
+  | { blockType?: "neutral"; r2?: number; c2?: number }
+  | { blockType: "movable_green"; r2?: never; c2?: never }
+);
 
 /** Declarative recipe for building a campaign stage — add new entries to extend the campaign. */
 export interface CampaignPlacement {
@@ -37,7 +35,7 @@ export interface CampaignBlueprint {
   botDifficulty: number;
   /** Independent sub-boards with their own territory zones and boundaries */
   subBoards?: SubBoardConfig[];
-  /** Neutral black blocks present from the start of the level */
+  /** Neutral obstacles present from the start of the level */
   neutralBlocks?: NeutralBlockDef[];
   /** Multi-cell shapes placed before singles fill the rest. Omit for a classic uniform grid. */
   placements?: CampaignPlacement[];
