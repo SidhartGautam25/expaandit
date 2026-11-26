@@ -199,7 +199,7 @@ const styles = StyleSheet.create({
   percentTextP1: {
     fontSize: 10,
     fontWeight: "700",
-    color: EXTRUSION_THEME.player1.primary,
+    color: EXTRUSION_THEME.player1.text,
     opacity: 0.9,
     includeFontPadding: false,
   },
@@ -227,7 +227,7 @@ const styles = StyleSheet.create({
   percentTextP2: {
     fontSize: 10,
     fontWeight: "700",
-    color: EXTRUSION_THEME.player2.primary,
+    color: EXTRUSION_THEME.player2.text,
     opacity: 0.9,
     includeFontPadding: false,
   },
