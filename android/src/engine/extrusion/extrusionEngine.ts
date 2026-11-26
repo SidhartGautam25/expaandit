@@ -2,15 +2,20 @@ import { GameBoard } from "../../types/board";
 import { GameBox, Coord } from "../../types/box";
 import { Player } from "../../types/game";
 import { SubBoardConfig } from "../../types/campaignBlueprint";
-import { cloneBoard } from "../board/boardFactory";
-import { PLAYER_1_PRIMARY, PLAYER_2_PRIMARY } from "../../constants/theme/extrusionTheme";
+import { EXTRUSION_THEME, PLAYER_1_PRIMARY, PLAYER_2_PRIMARY } from "../../constants/theme/extrusionTheme";
 
-export type ExtrudeDirection = "up" | "down" | "left" | "right";
+export const EXTRUSION_DIRECTIONS = ["up", "down", "left", "right"] as const;
+export type ExtrudeDirection = (typeof EXTRUSION_DIRECTIONS)[number];
 export type TerritoryZone = "player1" | "player2" | "neutral";
+export type ExtrusionPlayMode = "own" | "forced-extrude" | "forced-spawn";
 
-export type ExtrusionMove =
-  | { type: "spawn"; row: number; col: number; player: Player }
-  | { type: "extrude"; boxId: string; direction: ExtrudeDirection; player: Player };
+export type ExtrusionAction =
+  | { type: "spawn"; row: number; col: number }
+  | { type: "spawn_green"; row: number; col: number }
+  | { type: "extrude"; boxId: string; direction: ExtrudeDirection }
+  | { type: "slide"; boxId: string; direction: ExtrudeDirection };
+
+export type ExtrusionMove = ExtrusionAction & { player: Player };
 
 export interface RectBounds {
   r1: number;
@@ -117,37 +122,33 @@ export function getCellTerritoryZone(
   board: GameBoard,
   row: number,
   col: number,
-  unlockedWhiteCells?: string[] | Set<string>,
-  unlockedWhiteRows?: number[] | Set<number>
+  unlockedWhiteCells: string[] | Set<string> | undefined = board.unlockedWhiteCells,
+  unlockedWhiteRows: number[] | Set<number> | undefined = board.unlockedWhiteRows
 ): TerritoryZone | "void" {
-  const sb = findSubBoardForCell(board, row, col);
-  if (!sb) return "void";
+  const subBoard = findSubBoardForCell(board, row, col);
+  if (!subBoard) return "void";
+  const legacyRows = (board.subBoards?.length ?? 0) <= 1 ? unlockedWhiteRows : undefined;
+  return territoryInSubBoard(subBoard, row, col, unlockedWhiteCells, legacyRows);
+}
 
-  const key = `${row},${col}`;
-  if (unlockedWhiteCells) {
-    const cellSet = Array.isArray(unlockedWhiteCells)
-      ? new Set(unlockedWhiteCells)
-      : unlockedWhiteCells;
-    if (cellSet.has(key)) return "neutral";
-  }
+function includesCell<T>(values: T[] | Set<T> | undefined, value: T): boolean {
+  return values instanceof Set ? values.has(value) : values?.includes(value) ?? false;
+}
 
-  if (!board.subBoards || board.subBoards.length <= 1) {
-    if (unlockedWhiteRows) {
-      const rowSet = Array.isArray(unlockedWhiteRows)
-        ? new Set(unlockedWhiteRows)
-        : unlockedWhiteRows;
-      if (rowSet.has(row)) return "neutral";
-    }
-  }
-
-  const sbRows = sb.r2 - sb.r1 + 1;
-  const relRow = row - sb.r1;
-
-  if (sbRows % 2 === 1 && relRow === Math.floor(sbRows / 2)) {
-    return "neutral";
-  }
-
-  return relRow < sbRows / 2 ? "player1" : "player2";
+function territoryInSubBoard(
+  subBoard: SubBoardConfig,
+  row: number,
+  col: number,
+  whiteCells: string[] | Set<string> | undefined,
+  whiteRows: number[] | Set<number> | undefined
+): TerritoryZone {
+  const midline = (subBoard.r1 + subBoard.r2) / 2;
+  if (
+    row === midline ||
+    includesCell(whiteRows, row) ||
+    includesCell(whiteCells, `${row},${col}`)
+  ) return "neutral";
+  return row < midline ? "player1" : "player2";
 }
 
 /**
@@ -164,6 +165,7 @@ export function computeUnlockedWhiteState(
   const whiteRowSet = new Set<number>(previouslyUnlockedRows);
 
   const subBoards = getSubBoards(board);
+  const boxes = Object.values(board.boxes);
 
   for (const sb of subBoards) {
     const sbRows = sb.r2 - sb.r1 + 1;
@@ -182,7 +184,7 @@ export function computeUnlockedWhiteState(
     let maxP1Row = -1;
     let minP2Row = sb.r2 + 1;
 
-    for (const box of Object.values(board.boxes)) {
+    for (const box of boxes) {
       if (box.owner === 1) {
         for (const cell of box.cells) {
           if (cell.col >= sb.c1 && cell.col <= sb.c2 && cell.row >= sb.r1 && cell.row <= sb.r2) {
@@ -238,340 +240,406 @@ export function computeUnlockedWhiteRows(
   return result.unlockedWhiteRows;
 }
 
-/**
- * Checks whether the given player is allowed to spawn a 1x1 block at (row, col).
- * Core Rule: A player can only spawn in their own region (or neutral white zone).
- * Players CANNOT click to spawn inside the opponent's territory!
- */
+/** Check a spawn for the actor or for the opponent during forced play. */
 export function canSpawnAt(
   board: GameBoard,
   row: number,
   col: number,
   player: Player,
-  unlockedWhiteRows?: number[],
-  unlockedWhiteCells?: string[]
+  unlockedWhiteRows = board.unlockedWhiteRows,
+  unlockedWhiteCells = board.unlockedWhiteCells,
+  mode: ExtrusionPlayMode = "own"
 ): boolean {
-  if (row < 0 || row >= board.rows || col < 0 || col >= board.cols) {
-    return false;
-  }
-  // Cell must be completely empty
-  if (board.cellMap[row]?.[col] !== null) {
+  if (mode === "forced-extrude" || board.cellMap[row]?.[col] !== null) {
     return false;
   }
 
-  const whiteCells = unlockedWhiteCells ?? board.unlockedWhiteCells;
-  const whiteRows = unlockedWhiteRows ?? board.unlockedWhiteRows;
-  const zone = getCellTerritoryZone(board, row, col, whiteCells, whiteRows);
-
-  if (zone === "void") return false;
-  if (zone === "neutral") return true;
-  if (player === 1 && zone === "player1") return true;
-  if (player === 2 && zone === "player2") return true;
-
-  // Cannot spawn in opponent's territory
-  return false;
+  const owner = mode === "forced-spawn" ? opponentOf(player) : player;
+  const zone = getCellTerritoryZone(board, row, col, unlockedWhiteCells, unlockedWhiteRows);
+  return zone === "neutral" || zone === (owner === 1 ? "player1" : "player2");
 }
 
-/**
- * Computes bounding rectangle coordinates for a rectangular block.
- */
 export function getBlockRect(box: GameBox): RectBounds {
   let r1 = Infinity;
   let c1 = Infinity;
   let r2 = -Infinity;
   let c2 = -Infinity;
 
-  if (box && Array.isArray(box.cells)) {
-    for (const cell of box.cells) {
-      if (cell.row < r1) r1 = cell.row;
-      if (cell.row > r2) r2 = cell.row;
-      if (cell.col < c1) c1 = cell.col;
-      if (cell.col > c2) c2 = cell.col;
-    }
+  for (const cell of box.cells) {
+    r1 = Math.min(r1, cell.row);
+    c1 = Math.min(c1, cell.col);
+    r2 = Math.max(r2, cell.row);
+    c2 = Math.max(c2, cell.col);
   }
 
-  if (!isFinite(r1)) {
-    return { r1: 0, c1: 0, r2: 0, c2: 0 };
-  }
-
-  return { r1, c1, r2, c2 };
+  return box.cells.length > 0 ? { r1, c1, r2, c2 } : { r1: 0, c1: 0, r2: 0, c2: 0 };
 }
 
-/**
- * Returns the target layer of cells that would be added if the box expands in direction `dir`.
- */
-export function getTargetStrip(box: GameBox, direction: ExtrudeDirection): Coord[] {
-  const { r1, c1, r2, c2 } = getBlockRect(box);
-  const strip: Coord[] = [];
-
+function getStripBounds(rect: RectBounds, direction: ExtrudeDirection): RectBounds {
   switch (direction) {
     case "up":
-      for (let c = c1; c <= c2; c++) {
-        strip.push({ row: r1 - 1, col: c });
-      }
-      break;
+      return { ...rect, r1: rect.r1 - 1, r2: rect.r1 - 1 };
     case "down":
-      for (let c = c1; c <= c2; c++) {
-        strip.push({ row: r2 + 1, col: c });
-      }
-      break;
+      return { ...rect, r1: rect.r2 + 1, r2: rect.r2 + 1 };
     case "left":
-      for (let r = r1; r <= r2; r++) {
-        strip.push({ row: r, col: c1 - 1 });
-      }
-      break;
+      return { ...rect, c1: rect.c1 - 1, c2: rect.c1 - 1 };
     case "right":
-      for (let r = r1; r <= r2; r++) {
-        strip.push({ row: r, col: c2 + 1 });
-      }
-      break;
+      return { ...rect, c1: rect.c2 + 1, c2: rect.c2 + 1 };
   }
-
-  return strip;
 }
 
-/**
- * Checks if a block can expand in `direction`.
- * Sub-board independence rule: All target cells must be within the SAME sub-board
- * and completely empty. Expansion outside the sub-board boundary is illegal.
- */
-export function canExpandBlock(
-  board: GameBoard,
-  box: GameBox,
-  direction: ExtrudeDirection
-): boolean {
-  const strip = getTargetStrip(box, direction);
-  if (strip.length === 0) return false;
-
-  const sb = findSubBoardForBox(board, box);
-
-  for (const cell of strip) {
-    if (sb) {
-      // Must stay strictly within the sub-board boundary
-      if (
-        cell.row < sb.r1 ||
-        cell.row > sb.r2 ||
-        cell.col < sb.c1 ||
-        cell.col > sb.c2
-      ) {
-        return false;
-      }
-    } else {
-      if (
-        cell.row < 0 ||
-        cell.row >= board.rows ||
-        cell.col < 0 ||
-        cell.col >= board.cols
-      ) {
-        return false;
-      }
-    }
-    // Emptiness check (cannot expand into opponent or own separate blocks)
-    if (board.cellMap[cell.row][cell.col] !== null) {
-      return false;
+function cellsInRect({ r1, c1, r2, c2 }: RectBounds): Coord[] {
+  const cells: Coord[] = [];
+  for (let row = r1; row <= r2; row++) {
+    for (let col = c1; col <= c2; col++) {
+      cells.push({ row, col });
     }
   }
+  return cells;
+}
 
+export function getTargetStrip(box: GameBox, direction: ExtrudeDirection): Coord[] {
+  return cellsInRect(getStripBounds(getBlockRect(box), direction));
+}
+
+function isOpenInSubBoard(
+  board: GameBoard,
+  bounds: RectBounds,
+  subBoard: SubBoardConfig | null
+): boolean {
+  if (
+    !subBoard ||
+    bounds.r1 < subBoard.r1 || bounds.r2 > subBoard.r2 ||
+    bounds.c1 < subBoard.c1 || bounds.c2 > subBoard.c2
+  ) {
+    return false;
+  }
+
+  for (let row = bounds.r1; row <= bounds.r2; row++) {
+    for (let col = bounds.c1; col <= bounds.c2; col++) {
+      if (board.cellMap[row]?.[col] !== null) return false;
+    }
+  }
   return true;
 }
 
-/**
- * Spawns a new 1x1 block on an empty valid cell.
- * Consumes 1 action.
- */
+export function canExpandBlock(
+  board: GameBoard,
+  box: GameBox,
+  direction: ExtrudeDirection,
+  player?: Player,
+  mode: ExtrusionPlayMode = "own"
+): boolean {
+  if (box.blockType === "movable_green" || box.cells.length === 0) return false;
+  if (player !== undefined) {
+    if (mode === "forced-spawn") return false;
+    if (mode === "forced-extrude" && box.owner !== opponentOf(player)) return false;
+    if (mode === "own" && box.owner !== null && box.owner !== player) return false;
+  }
+
+  return isOpenInSubBoard(
+    board,
+    getStripBounds(getBlockRect(box), direction),
+    findSubBoardForBox(board, box)
+  );
+}
+
+export function getValidExtrudeDirections(
+  board: GameBoard,
+  box: GameBox
+): ExtrudeDirection[] {
+  if (box.blockType === "movable_green" || box.cells.length === 0) return [];
+  const rect = getBlockRect(box);
+  const subBoard = findSubBoardForBox(board, box);
+  return EXTRUSION_DIRECTIONS.filter((direction) =>
+    isOpenInSubBoard(board, getStripBounds(rect, direction), subBoard)
+  );
+}
+
+const STEP: Record<ExtrudeDirection, Coord> = {
+  up: { row: -1, col: 0 },
+  down: { row: 1, col: 0 },
+  left: { row: 0, col: -1 },
+  right: { row: 0, col: 1 },
+};
+
+export function getSlideTarget(box: GameBox, direction: ExtrudeDirection): Coord | null {
+  const from = box.cells[0];
+  if (box.blockType !== "movable_green" || box.owner !== null || box.cells.length !== 1) {
+    return null;
+  }
+  const step = STEP[direction];
+  return { row: from.row + step.row, col: from.col + step.col };
+}
+
+export function canMoveBlock(board: GameBoard, box: GameBox, direction: ExtrudeDirection): boolean {
+  const to = getSlideTarget(box, direction);
+  if (!to || board.cellMap[to.row]?.[to.col] !== null) return false;
+  const subBoard = findSubBoardForBox(board, box);
+  return !!subBoard && to.row >= subBoard.r1 && to.row <= subBoard.r2 &&
+    to.col >= subBoard.c1 && to.col <= subBoard.c2;
+}
+
+function opponentOf(player: Player): Player {
+  return player === 1 ? 2 : 1;
+}
+
+interface PlayerMoveOptions {
+  spawns: ExtrusionAction[];
+  expansions: ExtrusionAction[];
+}
+
+export interface ExtrusionMoveOptions {
+  players: Record<Player, PlayerMoveOptions>;
+  neutral: ExtrusionAction[];
+}
+
+/** Enumerate both players' options and the shared obstacle actions once per position. */
+export function getExtrusionMoveOptions(
+  board: GameBoard,
+  unlockedWhiteRows = board.unlockedWhiteRows,
+  unlockedWhiteCells = board.unlockedWhiteCells
+): ExtrusionMoveOptions {
+  const players: ExtrusionMoveOptions["players"] = {
+    1: { spawns: [], expansions: [] },
+    2: { spawns: [], expansions: [] },
+  };
+  const neutral: ExtrusionAction[] = [];
+  const subBoards = getSubBoards(board);
+  const whiteRows = subBoards.length === 1 ? new Set(unlockedWhiteRows) : undefined;
+  const whiteCells = new Set(unlockedWhiteCells);
+
+  for (const subBoard of subBoards) {
+    for (let row = subBoard.r1; row <= subBoard.r2; row++) {
+      for (let col = subBoard.c1; col <= subBoard.c2; col++) {
+        if (board.cellMap[row]?.[col] !== null) continue;
+        const zone = territoryInSubBoard(subBoard, row, col, whiteCells, whiteRows);
+        const spawn: ExtrusionAction = { type: "spawn", row, col };
+        if (zone !== "player2") players[1].spawns.push(spawn);
+        if (zone !== "player1") players[2].spawns.push(spawn);
+        if (zone === "neutral") neutral.push({ type: "spawn_green", row, col });
+      }
+    }
+  }
+
+  for (const box of Object.values(board.boxes)) {
+    if (box.blockType === "movable_green") {
+      for (const direction of EXTRUSION_DIRECTIONS) {
+        if (canMoveBlock(board, box, direction)) {
+          neutral.push({ type: "slide", boxId: box.id, direction });
+        }
+      }
+      continue;
+    }
+    const moves = box.owner === null ? neutral : players[box.owner].expansions;
+    for (const direction of getValidExtrudeDirections(board, box)) {
+      moves.push({ type: "extrude", boxId: box.id, direction });
+    }
+  }
+
+  return { players, neutral };
+}
+
+function hasOwnMoves(options: PlayerMoveOptions): boolean {
+  return options.spawns.length > 0 || options.expansions.length > 0;
+}
+
+export function getExtrusionTurn(
+  options: ExtrusionMoveOptions,
+  player: Player,
+  forcedOpponentPlay = false
+): { mode: ExtrusionPlayMode; moves: ExtrusionAction[] } {
+  const own = options.players[player];
+  if (forcedOpponentPlay || !hasOwnMoves(own)) {
+    const other = options.players[opponentOf(player)];
+    if (other.expansions.length > 0) {
+      return { mode: "forced-extrude", moves: other.expansions };
+    }
+    if (other.spawns.length > 0) {
+      return { mode: "forced-spawn", moves: other.spawns };
+    }
+  }
+
+  // Shared obstacle moves are the fallback when neither player can score.
+  return { mode: "own", moves: [...own.spawns, ...own.expansions, ...options.neutral] };
+}
+
+export function hasPlayerOwnLegalMove(board: GameBoard, player: Player): boolean {
+  return hasOwnMoves(getExtrusionMoveOptions(board).players[player]);
+}
+
+export function hasAnyPlayableMoveOnBoard(
+  board: GameBoard,
+  unlockedWhiteRows = board.unlockedWhiteRows,
+  unlockedWhiteCells = board.unlockedWhiteCells
+): boolean {
+  if (isBoardCompletelyFull(board)) return false;
+  const options = getExtrusionMoveOptions(board, unlockedWhiteRows, unlockedWhiteCells);
+  return hasOwnMoves(options.players[1]) || hasOwnMoves(options.players[2]) || options.neutral.length > 0;
+}
+
+/** Forced play and shared obstacles give either actor an action whenever one exists. */
+export function hasPlayerAnyLegalMove(
+  board: GameBoard,
+  _player: Player,
+  unlockedWhiteRows = board.unlockedWhiteRows,
+  unlockedWhiteCells = board.unlockedWhiteCells
+): boolean {
+  return hasAnyPlayableMoveOnBoard(board, unlockedWhiteRows, unlockedWhiteCells);
+}
+
+function updateBox(
+  board: GameBoard,
+  box: GameBox,
+  occupied: Coord[],
+  vacated?: Coord
+): GameBoard {
+  const cellMap = [...board.cellMap];
+  const setCell = ({ row, col }: Coord, id: string | null) => {
+    if (cellMap[row] === board.cellMap[row]) cellMap[row] = [...board.cellMap[row]];
+    cellMap[row][col] = id;
+  };
+  if (vacated) setCell(vacated, null);
+  for (const cell of occupied) setCell(cell, box.id);
+  return { ...board, cellMap, boxes: { ...board.boxes, [box.id]: box } };
+}
+
+function placeSingleBlock(board: GameBoard, row: number, col: number, owner: Player | null) {
+  // Plans can refer to a new block on their second action, so IDs must be repeatable.
+  const prefix = (owner === null ? "green-" : "spawn-") + row + "-" + col;
+  let id = prefix;
+  for (let n = 2; board.boxes[id]; n++) id = prefix + "-" + n;
+
+  const cell = { row, col };
+  const box: GameBox = {
+    id,
+    blockType: owner === null ? "movable_green" : "standard",
+    size: 1,
+    captureThreshold: 1,
+    cells: [cell],
+    anchor: cell,
+    shape: "single",
+    count: 1,
+    owner,
+    claimedBy: owner,
+    frozenBy: null,
+    baseColor: owner === null
+      ? EXTRUSION_THEME.greenBlock.primary
+      : owner === 1 ? PLAYER_1_PRIMARY : PLAYER_2_PRIMARY,
+  };
+  return { board: updateBox(board, box, [cell]), boxId: id };
+}
+
 export function executeSpawn(
   board: GameBoard,
   row: number,
   col: number,
   player: Player,
-  unlockedWhiteRows: number[] = [],
-  unlockedWhiteCells?: string[]
-): {
-  board: GameBoard;
-  boxId: string;
-  unlockedWhiteRows: number[];
-  unlockedWhiteCells: string[];
-} | null {
-  if (!canSpawnAt(board, row, col, player, unlockedWhiteRows, unlockedWhiteCells)) {
+  unlockedWhiteRows = board.unlockedWhiteRows ?? [],
+  unlockedWhiteCells = board.unlockedWhiteCells,
+  mode: ExtrusionPlayMode = "own"
+) {
+  if (!canSpawnAt(board, row, col, player, unlockedWhiteRows, unlockedWhiteCells, mode)) {
     return null;
   }
-
-  const nextBoard = cloneBoard(board);
-  const boxId = `b-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
-
-  const newBox: GameBox = {
-    id: boxId,
-    size: 1,
-    captureThreshold: 1,
-    cells: [{ row, col }],
-    anchor: { row, col },
-    shape: "single",
-    count: 1,
-    owner: player,
-    claimedBy: player,
-    frozenBy: null,
-    baseColor: player === 1 ? PLAYER_1_PRIMARY : PLAYER_2_PRIMARY,
-  };
-
-  nextBoard.boxes[boxId] = newBox;
-  nextBoard.cellMap[row][col] = boxId;
-
-  const whiteState = computeUnlockedWhiteState(
-    nextBoard,
-    nextBoard.unlockedWhiteCells ?? [],
-    unlockedWhiteRows
-  );
-  nextBoard.unlockedWhiteRows = whiteState.unlockedWhiteRows;
-  nextBoard.unlockedWhiteCells = whiteState.unlockedWhiteCells;
-
-  return {
-    board: nextBoard,
-    boxId,
-    unlockedWhiteRows: whiteState.unlockedWhiteRows,
-    unlockedWhiteCells: whiteState.unlockedWhiteCells,
-  };
+  const owner = mode === "forced-spawn" ? opponentOf(player) : player;
+  const result = placeSingleBlock(board, row, col, owner);
+  // A legal spawn only occupies territory that is already available to its owner.
+  const whiteState = { unlockedWhiteRows, unlockedWhiteCells: unlockedWhiteCells ?? [] };
+  return { ...result, board: { ...result.board, ...whiteState }, ...whiteState };
 }
 
-/**
- * Extrudes an existing rectangular block in the chosen direction by 1 layer along its edge.
- * Consumes 1 action.
- */
 export function executeExtrusion(
   board: GameBoard,
   boxId: string,
   direction: ExtrudeDirection,
   player: Player,
-  unlockedWhiteRows: number[] = [],
-  unlockedWhiteCells?: string[]
-): {
-  board: GameBoard;
-  box: GameBox;
-  unlockedWhiteRows: number[];
-  unlockedWhiteCells: string[];
-  addedCells: Coord[];
-} | null {
-  const box = board.boxes[boxId];
-  // Can be extruded by owner, or if neutral (box.owner === null) by either player
-  if (!box || (box.owner !== player && box.owner !== null)) {
-    return null;
-  }
+  unlockedWhiteRows = board.unlockedWhiteRows ?? [],
+  unlockedWhiteCells = board.unlockedWhiteCells ?? [],
+  mode: ExtrusionPlayMode = "own"
+) {
+  const original = board.boxes[boxId];
+  if (!original || !canExpandBlock(board, original, direction, player, mode)) return null;
 
-  if (!canExpandBlock(board, box, direction)) {
-    return null;
-  }
-
-  const nextBoard = cloneBoard(board);
-  const targetBox = nextBoard.boxes[boxId];
-  const strip = getTargetStrip(targetBox, direction);
-
-  for (const cell of strip) {
-    targetBox.cells.push({ row: cell.row, col: cell.col });
-    nextBoard.cellMap[cell.row][cell.col] = boxId;
-  }
-
-  targetBox.size = targetBox.cells.length;
-  targetBox.count = targetBox.size;
-  targetBox.captureThreshold = targetBox.size;
-
-  // Re-anchor to top-left cell
-  let minR = Infinity;
-  let minC = Infinity;
-  for (const c of targetBox.cells) {
-    if (c.row < minR || (c.row === minR && c.col < minC)) {
-      minR = c.row;
-      minC = c.col;
-    }
-  }
-  targetBox.anchor = { row: minR, col: minC };
-
-  const whiteState = computeUnlockedWhiteState(
-    nextBoard,
-    nextBoard.unlockedWhiteCells ?? [],
-    unlockedWhiteRows
-  );
-  nextBoard.unlockedWhiteRows = whiteState.unlockedWhiteRows;
-  nextBoard.unlockedWhiteCells = whiteState.unlockedWhiteCells;
+  const addedCells = getTargetStrip(original, direction);
+  const cells = [...original.cells, ...addedCells];
+  const first = addedCells[0];
+  const anchor = direction === "up" || direction === "left" ? first : original.anchor;
+  const size = cells.length;
+  const box = { ...original, cells, anchor, size, count: size, captureThreshold: size };
+  const nextBoard = updateBox(board, box, addedCells);
+  const whiteState = box.owner === null
+    ? { unlockedWhiteRows, unlockedWhiteCells }
+    : computeUnlockedWhiteState(nextBoard, unlockedWhiteCells, unlockedWhiteRows);
 
   return {
-    board: nextBoard,
-    box: targetBox,
-    unlockedWhiteRows: whiteState.unlockedWhiteRows,
-    unlockedWhiteCells: whiteState.unlockedWhiteCells,
-    addedCells: strip,
+    board: { ...nextBoard, ...whiteState },
+    box,
+    addedCells,
+    ...whiteState,
   };
 }
 
-/**
- * Returns all valid directions an owned block can expand.
- */
-export function getValidExtrudeDirections(
-  board: GameBoard,
-  box: GameBox
-): ExtrudeDirection[] {
-  const directions: ExtrudeDirection[] = ["up", "down", "left", "right"];
-  return directions.filter((dir) => canExpandBlock(board, box, dir));
+export function executeMoveBlock(board: GameBoard, box: GameBox, direction: ExtrudeDirection) {
+  if (!canMoveBlock(board, box, direction)) return null;
+  const destination = getSlideTarget(box, direction);
+  if (!destination) return null;
+  const source = box.cells[0];
+  if (board.cellMap[source.row]?.[source.col] !== box.id) return null;
+  const moved = { ...box, cells: [destination], anchor: destination };
+  return {
+    board: updateBox(board, moved, [destination], source),
+    changedCells: [destination],
+  };
 }
 
-/**
- * Checks if a player has any legal moves available (spawn or extrusion on any sub-board).
- */
-export function hasPlayerAnyLegalMove(
+export function executeExtrusionAction(
   board: GameBoard,
+  action: ExtrusionAction,
   player: Player,
-  unlockedWhiteRows: number[] = [],
-  unlockedWhiteCells?: string[]
-): boolean {
-  const whiteCells = unlockedWhiteCells ?? board.unlockedWhiteCells;
-  const subBoards = getSubBoards(board);
-
-  // 1. Check if can spawn in any sub-board cell
-  for (const sb of subBoards) {
-    for (let r = sb.r1; r <= sb.r2; r++) {
-      for (let c = sb.c1; c <= sb.c2; c++) {
-        if (canSpawnAt(board, r, c, player, unlockedWhiteRows, whiteCells)) {
-          return true;
-        }
-      }
+  mode: ExtrusionPlayMode
+): { board: GameBoard; changedCells: Coord[] } | null {
+  switch (action.type) {
+    case "spawn": {
+      const { row, col } = action;
+      const result = executeSpawn(board, row, col, player, undefined, undefined, mode);
+      return result ? { board: result.board, changedCells: [{ row, col }] } : null;
     }
-  }
-
-  // 2. Check if any owned or neutral block can expand
-  for (const box of Object.values(board.boxes)) {
-    if (box.owner === player || box.owner === null) {
+    case "spawn_green": {
+      const { row, col } = action;
       if (
-        canExpandBlock(board, box, "up") ||
-        canExpandBlock(board, box, "down") ||
-        canExpandBlock(board, box, "left") ||
-        canExpandBlock(board, box, "right")
+        mode !== "own" || board.cellMap[row]?.[col] !== null ||
+        getCellTerritoryZone(board, row, col) !== "neutral"
       ) {
-        return true;
+        return null;
       }
+      const result = placeSingleBlock(board, row, col, null);
+      return { board: result.board, changedCells: [{ row, col }] };
+    }
+    case "extrude": {
+      const result = executeExtrusion(
+        board, action.boxId, action.direction, player, undefined, undefined, mode
+      );
+      return result ? { board: result.board, changedCells: result.addedCells } : null;
+    }
+    case "slide": {
+      const box = board.boxes[action.boxId];
+      return mode === "own" && box ? executeMoveBlock(board, box, action.direction) : null;
     }
   }
-
-  return false;
 }
 
-/**
- * Returns whether all playable cells on all sub-boards are occupied.
- */
 export function isBoardCompletelyFull(board: GameBoard): boolean {
-  const subBoards = getSubBoards(board);
-  for (const sb of subBoards) {
-    for (let r = sb.r1; r <= sb.r2; r++) {
-      for (let c = sb.c1; c <= sb.c2; c++) {
-        if (board.cellMap[r][c] === null) {
-          return false;
-        }
+  for (const subBoard of getSubBoards(board)) {
+    for (let row = subBoard.r1; row <= subBoard.r2; row++) {
+      for (let col = subBoard.c1; col <= subBoard.c2; col++) {
+        if (board.cellMap[row]?.[col] === null) return false;
       }
     }
   }
   return true;
 }
 
-/**
- * Computes exact count of captured grid cells for Player 1 and Player 2 across all sub-boards.
- */
 export function computeExtrusionScores(board: GameBoard): {
   player1Score: number;
   player2Score: number;
@@ -579,157 +647,14 @@ export function computeExtrusionScores(board: GameBoard): {
 } {
   let player1Score = 0;
   let player2Score = 0;
-
   for (const box of Object.values(board.boxes)) {
-    if (box.owner === 1) {
-      player1Score += box.cells.length;
-    } else if (box.owner === 2) {
-      player2Score += box.cells.length;
-    }
+    if (box.owner === 1) player1Score += box.cells.length;
+    if (box.owner === 2) player2Score += box.cells.length;
   }
 
-  const subBoards = getSubBoards(board);
-  let totalPlayableCells = 0;
-  for (const sb of subBoards) {
-    totalPlayableCells += (sb.r2 - sb.r1 + 1) * (sb.c2 - sb.c1 + 1);
-  }
-
-  return {
-    player1Score,
-    player2Score,
-    totalCells: totalPlayableCells > 0 ? totalPlayableCells : board.rows * board.cols,
-  };
-}
-
-/**
- * Intelligent AI choice for Bot (Player 2) across all sub-boards.
- */
-export function getBotExtrusionMove(
-  board: GameBoard,
-  botPlayer: Player = 2,
-  unlockedWhiteRows: number[] = [],
-  difficulty: number = 3
-): ExtrusionMove | null {
-  const expansions: {
-    move: ExtrusionMove;
-    gain: number;
-    territoryBonus: number;
-    targetRow: number;
-  }[] = [];
-
-  // 1. Gather all legal expansions across all sub-boards
-  for (const box of Object.values(board.boxes)) {
-    if (box.owner === botPlayer) {
-      const directions: ExtrudeDirection[] = ["up", "down", "left", "right"];
-      for (const dir of directions) {
-        if (canExpandBlock(board, box, dir)) {
-          const strip = getTargetStrip(box, dir);
-          const gain = strip.length;
-          const sb = findSubBoardForBox(board, box);
-          const sbMid = sb ? sb.r1 + Math.floor((sb.r2 - sb.r1 + 1) / 2) : Math.floor(board.rows / 2);
-
-          let territoryBonus = 0;
-          let targetRow = 0;
-          for (const c of strip) {
-            targetRow += c.row;
-            if (c.row < sbMid) {
-              territoryBonus += 3; // pushing into opponent's territory in that sub-board!
-            }
-          }
-          targetRow /= strip.length;
-
-          expansions.push({
-            move: { type: "extrude", boxId: box.id, direction: dir, player: botPlayer },
-            gain,
-            territoryBonus,
-            targetRow,
-          });
-        }
-      }
-    } else if (box.owner === null) {
-      const directions: ExtrudeDirection[] = ["up", "down", "left", "right"];
-      for (const dir of directions) {
-        if (canExpandBlock(board, box, dir)) {
-          const strip = getTargetStrip(box, dir);
-          const sb = findSubBoardForBox(board, box);
-          const sbMid = sb ? sb.r1 + Math.floor((sb.r2 - sb.r1 + 1) / 2) : Math.floor(board.rows / 2);
-
-          let territoryBonus = 0;
-          let targetRow = 0;
-          for (const c of strip) {
-            targetRow += c.row;
-            if (c.row < sbMid) {
-              territoryBonus += 1.5;
-            }
-          }
-          targetRow /= strip.length;
-
-          expansions.push({
-            move: { type: "extrude", boxId: box.id, direction: dir, player: botPlayer },
-            gain: 0,
-            territoryBonus,
-            targetRow,
-          });
-        }
-      }
-    }
-  }
-
-  // 2. Gather all legal spawns across all sub-boards
-  const spawns: { move: ExtrusionMove; score: number }[] = [];
-  const subBoards = getSubBoards(board);
-  for (const sb of subBoards) {
-    const sbMid = sb.r1 + Math.floor((sb.r2 - sb.r1 + 1) / 2);
-    const sbCenterCol = sb.c1 + Math.floor((sb.c2 - sb.c1 + 1) / 2);
-
-    for (let r = sb.r1; r <= sb.r2; r++) {
-      for (let c = sb.c1; c <= sb.c2; c++) {
-        if (canSpawnAt(board, r, c, botPlayer, unlockedWhiteRows, board.unlockedWhiteCells)) {
-          let score = 1;
-          const distToMid = Math.abs(r - sbMid);
-          score += Math.max(0, 4 - distToMid);
-          const distToCenterCol = Math.abs(c - sbCenterCol);
-          score += Math.max(0, 3 - distToCenterCol);
-
-          spawns.push({
-            move: { type: "spawn", row: r, col: c, player: botPlayer },
-            score,
-          });
-        }
-      }
-    }
-  }
-
-  if (expansions.length === 0 && spawns.length === 0) {
-    return null;
-  }
-
-  expansions.sort((a, b) => b.gain * 2 + b.territoryBonus - (a.gain * 2 + a.territoryBonus));
-  spawns.sort((a, b) => b.score - a.score);
-
-  if (expansions.length === 0) {
-    return spawns[0].move;
-  }
-
-  const blunderRoll = Math.random();
-  const blunderThreshold = difficulty <= 1 ? 0.4 : difficulty <= 2 ? 0.2 : 0.05;
-
-  if (blunderRoll < blunderThreshold && spawns.length > 0 && Math.random() < 0.5) {
-    const randomIdx = Math.floor(Math.random() * Math.min(3, spawns.length));
-    return spawns[randomIdx].move;
-  }
-
-  const bestExpansion = expansions[0];
-  const bestSpawn = spawns[0];
-
-  if (bestExpansion.gain >= 2 || bestExpansion.territoryBonus > 0 || !bestSpawn) {
-    return bestExpansion.move;
-  }
-
-  const botBoxCount = Object.values(board.boxes).filter((b) => b.owner === botPlayer).length;
-  if (botBoxCount <= 1 && bestSpawn.score >= 5) {
-    return bestSpawn.move;
-  }
-
-  return bestExpansion.move;
+  const totalCells = getSubBoards(board).reduce(
+    (sum, sb) => sum + (sb.r2 - sb.r1 + 1) * (sb.c2 - sb.c1 + 1),
+    0
+  );
+  return { player1Score, player2Score, totalCells };
 }

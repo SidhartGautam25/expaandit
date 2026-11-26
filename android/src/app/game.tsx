@@ -11,6 +11,7 @@ import { LEVEL_REGISTRY } from "../constants/levels";
 import {
   COLORS,
   GAME_SCENE,
+  EXTRUSION_THEME,
   PLAYER_CAPTURE_COLORS,
   STAR_UI,
   CROWN_UI,
@@ -194,6 +195,9 @@ export default function GameScreen() {
     handleTileTap,
     handleSpawn,
     handleExtrude,
+    handleMoveBlock,
+    legalMoves,
+    isForcedOpponentPlay,
     handleTileLongPress,
     resetGame,
     handleUndo,
@@ -254,7 +258,7 @@ export default function GameScreen() {
 
   const activePlayerState = activePlayer === 1 ? players.player1 : players.player2;
   const isInteractionDisabled =
-    activePlayer === 2 && gameMode === "bot" && isBotThinking;
+    winner !== null || (activePlayer === 2 && gameMode === "bot");
   const layoutDensity = getGameLayoutDensity(screenHeight, level.rows, level.cols);
   const isCompactLayout = layoutDensity !== "normal";
   const isTightLayout = layoutDensity === "tight";
@@ -618,6 +622,14 @@ export default function GameScreen() {
               density={layoutDensity}
             />
           </View>
+          {isForcedOpponentPlay && (
+            <View style={styles.forcedPlayBanner} accessibilityLiveRegion="polite">
+              <Text style={styles.forcedPlayText}>No own moves! Forced to play for Opponent</Text>
+            </View>
+          )}
+          {!isInteractionDisabled && legalMoves.some((move) => move.type === "spawn_green") && (
+            <Text style={styles.greenPlacementHint}>Hold an empty neutral tile to place a green block.</Text>
+          )}
         </View>
 
         <View
@@ -631,8 +643,10 @@ export default function GameScreen() {
             onTileTap={handleTileTap}
             onSpawn={handleSpawn}
             onExtrude={handleExtrude}
+            onMoveBlock={handleMoveBlock}
+            legalMoves={legalMoves}
             onTileLongPress={handleTileLongPress}
-            disabled={isInteractionDisabled && !targetingMode}
+            disabled={isInteractionDisabled}
             lastBotMoves={lastBotMoves}
             activePlayer={activePlayer}
             turn={turn}
@@ -718,6 +732,31 @@ const styles = StyleSheet.create({
     paddingTop: 2,
     paddingBottom: 0,
     paddingHorizontal: 10,
+  },
+  forcedPlayBanner: {
+    alignSelf: "center",
+    marginTop: 4,
+    marginHorizontal: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    backgroundColor: EXTRUSION_THEME.player2.pillBg,
+    borderColor: EXTRUSION_THEME.player2.cellBorder,
+    borderWidth: 1,
+    borderRadius: 8,
+  },
+  forcedPlayText: {
+    color: EXTRUSION_THEME.player2.text,
+    fontSize: 12,
+    fontWeight: "800",
+    textAlign: "center",
+  },
+  greenPlacementHint: {
+    color: EXTRUSION_THEME.greenBlock.icon,
+    fontSize: 11,
+    fontWeight: "700",
+    marginTop: 4,
+    marginHorizontal: 12,
+    textAlign: "center",
   },
   boardContainer: {
     flex: 1,

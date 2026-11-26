@@ -28,6 +28,11 @@ export const EXTRUSION_THEME = {
     primary: BLACK,
     border: "#68615C",
   },
+  greenBlock: {
+    primary: "#34D399",
+    border: "#10B981",
+    icon: "#065F46",
+  },
   board: {
     frameBg: CREAM,
     canvasBg: BLACK,

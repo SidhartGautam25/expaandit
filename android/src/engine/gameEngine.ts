@@ -24,14 +24,21 @@ export {
   findSubBoardForBox,
   canSpawnAt,
   canExpandBlock,
+  canMoveBlock,
   getBlockRect,
   getTargetStrip,
   executeSpawn,
   executeExtrusion,
+  executeExtrusionAction,
+  executeMoveBlock,
+  getExtrusionMoveOptions,
+  getExtrusionTurn,
   getValidExtrudeDirections,
   hasPlayerAnyLegalMove,
+  hasPlayerOwnLegalMove,
+  hasAnyPlayableMoveOnBoard,
   isBoardCompletelyFull,
   computeExtrusionScores,
-  getBotExtrusionMove,
 } from "./extrusion/extrusionEngine";
-export type { ExtrudeDirection, TerritoryZone, ExtrusionMove, RectBounds } from "./extrusion/extrusionEngine";
+export type { ExtrudeDirection, TerritoryZone, ExtrusionAction, ExtrusionMove, ExtrusionPlayMode, RectBounds } from "./extrusion/extrusionEngine";
+export { getBotExtrusionMove } from "./ai/extrusionAi";
