@@ -39,48 +39,51 @@ export function createBoardFromLevel(
   );
   const boxes: Record<string, GameBox> = {};
 
-  // For Territorial Block-Extrusion Strategy Game:
-  // Neutral black blocks (starting from Level 5) act as interactive obstacles.
-  // Both players can extrude them, but they do NOT add points to either player's score.
-  if (level.neutralBlocks && level.neutralBlocks.length > 0) {
-    level.neutralBlocks.forEach((nb, index) => {
-      const r1 = Math.min(nb.r1, nb.r2 ?? nb.r1);
-      const r2 = Math.max(nb.r1, nb.r2 ?? nb.r1);
-      const c1 = Math.min(nb.c1, nb.c2 ?? nb.c1);
-      const c2 = Math.max(nb.c1, nb.c2 ?? nb.c1);
+  const subBoards = level.subBoards ?? [];
+  const neutralBlocks = [
+    ...(level.neutralBlocks ?? []),
+    ...subBoards.flatMap((subBoard) => subBoard.neutralBlocks ?? []),
+  ];
 
-      const cells: Coord[] = [];
-      for (let r = r1; r <= r2; r++) {
-        for (let c = c1; c <= c2; c++) {
-          if (r >= 0 && r < level.rows && c >= 0 && c < level.cols) {
-            cells.push({ row: r, col: c });
-          }
-        }
+  neutralBlocks.forEach((definition, index) => {
+    const green = definition.blockType === "movable_green";
+    const r1 = Math.min(definition.r1, definition.r2 ?? definition.r1);
+    const r2 = Math.max(definition.r1, definition.r2 ?? definition.r1);
+    const c1 = Math.min(definition.c1, definition.c2 ?? definition.c1);
+    const c2 = Math.max(definition.c1, definition.c2 ?? definition.c1);
+    if (r1 < 0 || r2 >= level.rows || c1 < 0 || c2 >= level.cols) return;
+    if (subBoards.length > 0 && !subBoards.some(
+      (sb) => r1 >= sb.r1 && r2 <= sb.r2 && c1 >= sb.c1 && c2 <= sb.c2
+    )) return;
+
+    const cells: Coord[] = [];
+    for (let row = r1; row <= r2; row++) {
+      for (let col = c1; col <= c2; col++) {
+        if (cellMap[row][col] !== null) return;
+        cells.push({ row, col });
       }
+    }
 
-      if (cells.length > 0) {
-        const boxId = `neutral-${level.campaignNumber}-${index}`;
-        const box: GameBox = {
-          id: boxId,
-          size: cells.length,
-          captureThreshold: cells.length,
-          cells,
-          anchor: { row: r1, col: c1 },
-          shape: cells.length === 1 ? "single" : "square",
-          count: cells.length,
-          owner: null,
-          claimedBy: null,
-          frozenBy: null,
-          baseColor: EXTRUSION_THEME.neutralBlock.primary,
-        };
-
-        boxes[boxId] = box;
-        for (const cell of cells) {
-          cellMap[cell.row][cell.col] = boxId;
-        }
-      }
-    });
-  }
+    const id = `neutral-${level.campaignNumber}-${index}`;
+    const size = cells.length;
+    boxes[id] = {
+      id,
+      blockType: green ? "movable_green" : "neutral",
+      size,
+      captureThreshold: size,
+      cells,
+      anchor: { row: r1, col: c1 },
+      shape: size === 1 ? "single" : "square",
+      count: size,
+      owner: null,
+      claimedBy: null,
+      frozenBy: null,
+      baseColor: green
+        ? EXTRUSION_THEME.greenBlock.primary
+        : EXTRUSION_THEME.neutralBlock.primary,
+    };
+    for (const cell of cells) cellMap[cell.row][cell.col] = id;
+  });
 
   const initialWhiteRows: number[] =
     level.rows % 2 === 1 ? [Math.floor(level.rows / 2)] : [];

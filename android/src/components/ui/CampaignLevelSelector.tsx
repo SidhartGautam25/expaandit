@@ -1,7 +1,7 @@
 import React from "react";
 import { StyleSheet, Text, View, Pressable, ScrollView } from "react-native";
 import { COLORS } from "../../constants/theme";
-import { LEVEL_REGISTRY } from "../../constants/levels";
+import { getExtrusionDifficultyName } from "../../constants/levels";
 import { VISIBLE_CAMPAIGN_LEVELS } from "../../registries/campaignLevels";
 
 interface CampaignLevelSelectorProps {
@@ -40,16 +40,13 @@ export function CampaignLevelSelector({
             const isCompleted = completedLevelIds.includes(level.id);
             const canSelect = !disabled && !isLocked;
 
-            const featureTag =
-              level.campaignNumber === 0
-                ? "🎓 Tutorial"
-                : level.campaignNumber <= 3
-                  ? "📦 Classic"
-                  : level.campaignNumber <= 5
-                    ? "▫️ Twins"
-                    : "🔷 Shapes";
-
-            const botName = LEVEL_REGISTRY[level.botDifficulty]?.name ?? "Bot";
+            const hasGreen = level.neutralBlocks?.some((block) => block.blockType === "movable_green");
+            const featureTag = level.campaignNumber === 0
+              ? "Tutorial"
+              : hasGreen ? "Sliding blocks"
+              : level.subBoards?.length ? "Sub-boards"
+              : level.neutralBlocks?.length ? "Black blocks" : "Open board";
+            const botName = `${getExtrusionDifficultyName(level.botDifficulty)} (Lvl ${level.botDifficulty})`;
 
             return (
               <Pressable

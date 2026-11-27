@@ -20,10 +20,9 @@ import {
 import {
   findSubBoardForCell,
   getCellTerritoryZone,
-  canSpawnAt,
-  canExpandBlock,
   getBlockRect,
   type ExtrudeDirection,
+  type ExtrusionAction,
 } from "../../engine/extrusion/extrusionEngine";
 import { EXTRUSION_THEME } from "../../constants/theme/extrusionTheme";
 import type { SubBoardConfig } from "../../types/campaignBlueprint";
@@ -53,6 +52,8 @@ function getSubBoardOffsets(
 
 interface GridBoardProps {
   board: GameBoard;
+  legalMoves: readonly ExtrusionAction[];
+  onMoveBlock: (boxId: string, direction: ExtrudeDirection) => void;
   onTileTap: (row: number, col: number) => void;
   onSpawn?: (row: number, col: number) => void;
   onExtrude?: (boxId: string, direction: ExtrudeDirection) => void;
@@ -70,146 +71,95 @@ interface GridBoardProps {
   layoutDensity?: GameLayoutDensity;
 }
 
+type BlockMove = Extract<ExtrusionAction, { boxId: string }>;
+
+const ARROWS: Record<ExtrudeDirection, { glyph: string; x: number; y: number }> = {
+  up: { glyph: "▲", x: 0, y: -1 },
+  down: { glyph: "▼", x: 0, y: 1 },
+  left: { glyph: "◀", x: -1, y: 0 },
+  right: { glyph: "▶", x: 1, y: 0 },
+};
+
+const HINT_SIZE = 24;
+const NO_BLOCK_MOVES: readonly BlockMove[] = [];
+
 interface ExtrudedBlockItemProps {
   box: GameBox;
-  board: GameBoard;
   layout: CellLayout;
   borderRadius: number;
-  activePlayer: Player;
+  moves: readonly BlockMove[];
   disabled: boolean;
   player1ColorHex: string;
   player2ColorHex: string;
   isSelected: boolean;
   onSelect: (boxId: string) => void;
-  onExtrude?: (boxId: string, direction: ExtrudeDirection) => void;
+  onAction: (move: BlockMove) => void;
 }
 
 function ExtrudedBlockItem({
-  box,
-  board,
-  layout,
-  borderRadius,
-  activePlayer,
-  disabled,
-  player1ColorHex,
-  player2ColorHex,
-  isSelected,
-  onSelect,
-  onExtrude,
+  box, layout, borderRadius, moves, disabled,
+  player1ColorHex, player2ColorHex, isSelected, onSelect, onAction,
 }: ExtrudedBlockItemProps) {
-  const isNeutral = box.owner === null;
-  const isOwned = box.owner === activePlayer || isNeutral;
+  const green = box.blockType === "movable_green";
+  const neutral = box.owner === null;
+  const canInteract = !disabled && moves.length > 0;
+  const blockTheme = green ? EXTRUSION_THEME.greenBlock : EXTRUSION_THEME.neutralBlock;
+  const backgroundColor = neutral ? blockTheme.primary : box.owner === 1 ? player1ColorHex : player2ColorHex;
+  const acted = useRef(false);
 
-  const blockColor = isNeutral
-    ? EXTRUSION_THEME.neutralBlock.primary
-    : box.owner === 1
-      ? player1ColorHex
-      : player2ColorHex;
-
-  const hasExtrudedRef = useRef(false);
-
-  const blockPanResponder = useMemo(
-    () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => !disabled && isOwned,
-        onMoveShouldSetPanResponder: (_evt, gestureState) => {
-          if (disabled || !isOwned) return false;
-          return Math.hypot(gestureState.dx, gestureState.dy) > 5;
-        },
-        onPanResponderGrant: () => {
-          hasExtrudedRef.current = false;
-        },
-        onPanResponderMove: (_evt, gestureState) => {
-          if (disabled || !isOwned || hasExtrudedRef.current) return;
-          const dx = gestureState.dx;
-          const dy = gestureState.dy;
-          const dist = Math.hypot(dx, dy);
-
-          if (dist >= 14) {
-            let direction: ExtrudeDirection;
-            if (Math.abs(dx) > Math.abs(dy)) {
-              direction = dx > 0 ? "right" : "left";
-            } else {
-              direction = dy > 0 ? "down" : "up";
-            }
-
-            hasExtrudedRef.current = true;
-            if (onExtrude) {
-              onExtrude(box.id, direction);
-            }
-          }
-        },
-        onPanResponderRelease: (_evt, gestureState) => {
-          if (disabled || !isOwned) return;
-          const dist = Math.hypot(gestureState.dx, gestureState.dy);
-          if (!hasExtrudedRef.current && dist < 10) {
-            onSelect(box.id);
-          }
-        },
-      }),
-    [disabled, isOwned, box.id, onExtrude, onSelect]
-  );
+  const panResponder = useMemo(() => PanResponder.create({
+    onStartShouldSetPanResponder: () => canInteract,
+    onMoveShouldSetPanResponder: (_event, gesture) =>
+      canInteract && Math.hypot(gesture.dx, gesture.dy) > 5,
+    onPanResponderGrant: () => {
+      acted.current = false;
+    },
+    onPanResponderMove: (_event, { dx, dy }) => {
+      if (!canInteract || acted.current || Math.hypot(dx, dy) < 14) return;
+      const direction = Math.abs(dx) > Math.abs(dy)
+        ? (dx > 0 ? "right" : "left")
+        : (dy > 0 ? "down" : "up");
+      const action = moves.find((move) => move.direction === direction);
+      if (!action) return;
+      acted.current = true;
+      onAction(action);
+    },
+    onPanResponderRelease: (_event, gesture) => {
+      if (canInteract && !acted.current && Math.hypot(gesture.dx, gesture.dy) < 10) {
+        onSelect(box.id);
+      }
+    },
+  }), [canInteract, moves, box.id, onAction, onSelect]);
 
   return (
     <View
+      accessible
+      accessibilityLabel={green ? "Green sliding block" : neutral ? "Black block" : "Player " + box.owner + " block"}
+      accessibilityActions={canInteract ? [{ name: "activate", label: "Select block" }] : undefined}
+      onAccessibilityAction={canInteract ? () => onSelect(box.id) : undefined}
       style={[
         styles.claimedBlock,
         layout,
         {
           borderRadius,
-          backgroundColor: blockColor,
-          borderColor: isSelected
-            ? EXTRUSION_THEME.board.frameBg
-            : EXTRUSION_THEME.neutralBlock.border,
-          borderWidth: isSelected ? 2 : isNeutral ? 1 : 0,
+          backgroundColor,
+          borderColor: isSelected ? EXTRUSION_THEME.board.frameBg : blockTheme.border,
+          borderWidth: isSelected ? 2 : neutral ? 1 : 0,
         },
       ]}
-      {...blockPanResponder.panHandlers}
+      {...panResponder.panHandlers}
     >
-      {/* Direction hints when block is active/selected */}
-      {isSelected && isOwned && !disabled && (
-        <>
-          {canExpandBlock(board, box, "up") && (
-            <Pressable
-              onPress={() => onExtrude?.(box.id, "up")}
-              style={[styles.directionHint, styles.hintUp]}
-            >
-              <Text style={styles.hintArrow}>▲</Text>
-            </Pressable>
-          )}
-          {canExpandBlock(board, box, "down") && (
-            <Pressable
-              onPress={() => onExtrude?.(box.id, "down")}
-              style={[styles.directionHint, styles.hintDown]}
-            >
-              <Text style={styles.hintArrow}>▼</Text>
-            </Pressable>
-          )}
-          {canExpandBlock(board, box, "left") && (
-            <Pressable
-              onPress={() => onExtrude?.(box.id, "left")}
-              style={[styles.directionHint, styles.hintLeft]}
-            >
-              <Text style={styles.hintArrow}>◀</Text>
-            </Pressable>
-          )}
-          {canExpandBlock(board, box, "right") && (
-            <Pressable
-              onPress={() => onExtrude?.(box.id, "right")}
-              style={[styles.directionHint, styles.hintRight]}
-            >
-              <Text style={styles.hintArrow}>▶</Text>
-            </Pressable>
-          )}
-        </>
-      )}
+      {green && <Text style={[styles.greenIcon, { fontSize: Math.min(18, layout.width / 2) }]}>✥</Text>}
     </View>
   );
 }
 
 export function GridBoard({
   board,
+  legalMoves,
   onTileTap,
+  onTileLongPress,
+  onMoveBlock,
   onSpawn,
   onExtrude,
   disabled,
@@ -220,7 +170,7 @@ export function GridBoard({
   layoutDensity = "normal",
 }: GridBoardProps) {
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
-  const [selectedBoxId, setSelectedBoxId] = useState<string | null>(null);
+  const [selection, setSelection] = useState<{ id: string; player: Player } | null>(null);
 
   const isTight = layoutDensity === "tight";
   const framePadding = isTight ? 8 : 12;
@@ -260,7 +210,6 @@ export function GridBoard({
   const { width, height } = getBoardContentSize(metrics, board.cols, board.rows);
   const tileRadius = metrics.cellSize * EXTRUSION_THEME.board.tileRadiusRatio;
   const cellStep = metrics.cellSize + metrics.gap;
-  const whiteRows = board.unlockedWhiteRows ?? [];
 
   const getTileLayout = (row: number, col: number): CellLayout => {
     const layout = getCellLayout(row, col, metrics);
@@ -276,86 +225,122 @@ export function GridBoard({
     };
   };
 
+  const { cellMoves, blockMoves } = useMemo(() => {
+    const cellMoves = new Map<number, { spawn: boolean; green: boolean }>();
+    const blockMoves = new Map<string, BlockMove[]>();
+    for (const move of legalMoves) {
+      if (move.type === "spawn" || move.type === "spawn_green") {
+        const index = move.row * board.cols + move.col;
+        const choices = cellMoves.get(index) ?? { spawn: false, green: false };
+        if (move.type === "spawn") choices.spawn = true;
+        else choices.green = true;
+        cellMoves.set(index, choices);
+      } else {
+        const choices = blockMoves.get(move.boxId) ?? [];
+        choices.push(move);
+        blockMoves.set(move.boxId, choices);
+      }
+    }
+    return { cellMoves, blockMoves };
+  }, [board.cols, legalMoves]);
+
+  const getBoxLayout = (box: GameBox): CellLayout => {
+    const { r1, c1, r2, c2 } = getBlockRect(box);
+    const layout = getTileLayout(r1, c1);
+    return {
+      ...layout,
+      width: layout.width + (c2 - c1) * cellStep,
+      height: layout.height + (r2 - r1) * cellStep,
+    };
+  };
+
+  const onBlockAction = (move: BlockMove) => {
+    if (move.type === "slide") onMoveBlock(move.boxId, move.direction);
+    else onExtrude?.(move.boxId, move.direction);
+  };
+
+  const selectedBox = !disabled && selection?.player === activePlayer ? board.boxes[selection.id] : undefined;
+  const selectedMoves = selectedBox ? blockMoves.get(selectedBox.id) ?? NO_BLOCK_MOVES : NO_BLOCK_MOVES;
+  const selectedLayout = selectedBox && selectedMoves.length > 0 ? getBoxLayout(selectedBox) : null;
+  const selectedGreen = selectedBox?.blockType === "movable_green";
+
   return (
     <View style={[styles.boardFrame, { padding: framePadding }]}>
-      <View
-        style={[
-          styles.container,
-          { width: width + extraWidth, height: height + extraHeight },
-        ]}
-      >
+      <View style={[styles.container, { width: width + extraWidth, height: height + extraHeight }]}>
         {Array.from({ length: board.rows }, (_, row) =>
           Array.from({ length: board.cols }, (_, col) => {
             if (board.cellMap[row]?.[col] !== null) return null;
-
-            const zone = getCellTerritoryZone(
-              board,
-              row,
-              col,
-              board.unlockedWhiteCells,
-              whiteRows
-            );
+            const zone = getCellTerritoryZone(board, row, col);
             if (zone === "void") return null;
 
-            const cellBg =
-              zone === "neutral"
-                ? EXTRUSION_THEME.neutral.bg
-                : EXTRUSION_THEME[zone].territoryBg;
-            const layout = getTileLayout(row, col);
-            const canSpawnHere = canSpawnAt(
-              board,
-              row,
-              col,
-              activePlayer,
-              whiteRows,
-              board.unlockedWhiteCells
-            );
+            const choices = cellMoves.get(row * board.cols + col);
+            const cellBg = zone === "neutral" ? EXTRUSION_THEME.neutral.bg : EXTRUSION_THEME[zone].territoryBg;
+            const spawn = choices?.spawn ? () => {
+              setSelection(null);
+              (onSpawn ?? onTileTap)(row, col);
+            } : undefined;
+            const placeGreen = choices?.green && onTileLongPress ? () => {
+              setSelection(null);
+              onTileLongPress(row, col);
+            } : undefined;
 
             return (
               <Pressable
                 key={`cell-${row}-${col}`}
                 style={({ pressed }) => [
                   styles.gridCell,
-                  layout,
+                  getTileLayout(row, col),
                   { backgroundColor: cellBg, borderRadius: tileRadius },
                   pressed && styles.pressedCell,
                 ]}
-                disabled={disabled || !canSpawnHere}
-                onPress={() => {
-                  if (disabled || !canSpawnHere) return;
-                  setSelectedBoxId(null);
-                  (onSpawn ?? onTileTap)(row, col);
-                }}
+                disabled={disabled || (!spawn && !placeGreen)}
+                accessibilityRole="button"
+                accessibilityLabel={`Empty tile, row ${row + 1}, column ${col + 1}`}
+                accessibilityActions={placeGreen ? [{ name: "placeGreen", label: "Place green block" }] : undefined}
+                onAccessibilityAction={placeGreen && !disabled ? (event) => {
+                  if (event.nativeEvent.actionName === "placeGreen") placeGreen();
+                } : undefined}
+                onPress={spawn}
+                onLongPress={placeGreen}
               />
             );
           })
         )}
 
-        {Object.values(board.boxes).map((box) => {
-          const { r1, c1, r2, c2 } = getBlockRect(box);
-          const layout = getTileLayout(r1, c1);
+        {Object.values(board.boxes).map((box) => (
+          <ExtrudedBlockItem
+            key={box.id}
+            box={box}
+            layout={getBoxLayout(box)}
+            borderRadius={tileRadius}
+            moves={blockMoves.get(box.id) ?? NO_BLOCK_MOVES}
+            disabled={disabled}
+            player1ColorHex={player1ColorHex}
+            player2ColorHex={player2ColorHex}
+            isSelected={selectedBox?.id === box.id && selectedMoves.length > 0}
+            onSelect={(id) => setSelection((previous) =>
+              previous?.id === id && previous.player === activePlayer ? null : { id, player: activePlayer }
+            )}
+            onAction={onBlockAction}
+          />
+        ))}
 
+        {selectedLayout && selectedMoves.map((move) => {
+          const { glyph, x, y } = ARROWS[move.direction];
+          const left = selectedLayout.left + selectedLayout.width / 2 +
+            x * (selectedLayout.width / 2 + gridGap) - HINT_SIZE / 2;
+          const top = selectedLayout.top + selectedLayout.height / 2 +
+            y * (selectedLayout.height / 2 + gridGap) - HINT_SIZE / 2;
           return (
-            <ExtrudedBlockItem
-              key={`block-${box.id}`}
-              box={box}
-              board={board}
-              layout={{
-                ...layout,
-                width: layout.width + (c2 - c1) * cellStep,
-                height: layout.height + (r2 - r1) * cellStep,
-              }}
-              borderRadius={tileRadius}
-              activePlayer={activePlayer}
-              disabled={disabled}
-              player1ColorHex={player1ColorHex}
-              player2ColorHex={player2ColorHex}
-              isSelected={selectedBoxId === box.id}
-              onSelect={(id) =>
-                setSelectedBoxId((prev) => (prev === id ? null : id))
-              }
-              onExtrude={onExtrude}
-            />
+            <Pressable
+              key={move.direction}
+              accessibilityRole="button"
+              accessibilityLabel={(selectedGreen ? "Slide green block " : "Expand block ") + move.direction}
+              onPress={() => onBlockAction(move)}
+              style={[styles.directionHint, { left, top }, selectedGreen && styles.greenHint]}
+            >
+              <Text style={[styles.hintArrow, selectedGreen && styles.greenHintArrow]}>{glyph}</Text>
+            </Pressable>
           );
         })}
       </View>
@@ -387,9 +372,10 @@ const styles = StyleSheet.create({
   },
   directionHint: {
     position: "absolute",
-    width: 22,
-    height: 22,
-    borderRadius: 11,
+    zIndex: 2,
+    width: HINT_SIZE,
+    height: HINT_SIZE,
+    borderRadius: HINT_SIZE / 2,
     backgroundColor: EXTRUSION_THEME.board.canvasBg,
     borderColor: EXTRUSION_THEME.board.frameBg,
     borderWidth: 1,
@@ -402,22 +388,16 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     includeFontPadding: false,
   },
-  hintUp: {
-    top: -12,
-    alignSelf: "center",
+  greenIcon: {
+    color: EXTRUSION_THEME.greenBlock.icon,
+    includeFontPadding: false,
+    fontWeight: "800",
   },
-  hintDown: {
-    bottom: -12,
-    alignSelf: "center",
+  greenHint: {
+    backgroundColor: EXTRUSION_THEME.greenBlock.primary,
+    borderColor: EXTRUSION_THEME.greenBlock.border,
   },
-  hintLeft: {
-    left: -12,
-    top: "50%",
-    transform: [{ translateY: -11 }],
-  },
-  hintRight: {
-    right: -12,
-    top: "50%",
-    transform: [{ translateY: -11 }],
+  greenHintArrow: {
+    color: EXTRUSION_THEME.greenBlock.icon,
   },
 });

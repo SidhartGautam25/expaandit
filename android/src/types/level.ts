@@ -12,7 +12,7 @@ export interface CampaignLevel {
   boxes: BoxDefinition[];
   /** Independent sub-boards with their own territory zones and boundaries */
   subBoards?: SubBoardConfig[];
-  /** Neutral black blocks present from the start of the level */
+  /** Neutral obstacles present from the start of the level */
   neutralBlocks?: NeutralBlockDef[];
   defaultTapsPerTurn: number;
   botDifficulty: number;

@@ -31,7 +31,7 @@ export const CAMPAIGN_BLUEPRINTS: CampaignBlueprint[] = [
     id: "campaign-2",
     campaignNumber: 2,
     name: "Warming Up",
-    description: "Same 10×6 board — your opponent starts thinking ahead.",
+    description: "Same 10×6 board with a bot that favors the frontier.",
     rows: 10,
     cols: 6,
     botDifficulty: 2,
@@ -43,7 +43,7 @@ export const CAMPAIGN_BLUEPRINTS: CampaignBlueprint[] = [
     description: "Master the 10×6 grid as the competition heats up.",
     rows: 10,
     cols: 6,
-    botDifficulty: 3,
+    botDifficulty: 2,
   },
   {
     id: "campaign-4",
@@ -52,7 +52,7 @@ export const CAMPAIGN_BLUEPRINTS: CampaignBlueprint[] = [
     description: "Battle across the 10×6 board. Watch out for bot incursions.",
     rows: 10,
     cols: 6,
-    botDifficulty: 2,
+    botDifficulty: 3,
   },
 
   // ── Stage 5: Introduction of Neutral Black Block at the Center ──
@@ -93,7 +93,7 @@ export const CAMPAIGN_BLUEPRINTS: CampaignBlueprint[] = [
     description: "Two neutral blocks guarding the outer wings. Push through the center or steer around.",
     rows: 10,
     cols: 6,
-    botDifficulty: 4,
+    botDifficulty: 5,
     neutralBlocks: [
       { r1: 2, c1: 1 }, // P1 outer wing
       { r1: 7, c1: 4 }, // P2 outer wing (180° symmetric)
@@ -105,15 +105,17 @@ export const CAMPAIGN_BLUEPRINTS: CampaignBlueprint[] = [
     id: "campaign-8",
     campaignNumber: 8,
     name: "The Pillars",
-    description: "Four pillar blocks break wide horizontal growth, creating three distinct clash corridors.",
+    description: "Four black pillars and two sliding green blocks shape the middle lanes.",
     rows: 10,
     cols: 6,
-    botDifficulty: 5,
+    botDifficulty: 6,
     neutralBlocks: [
       { r1: 2, c1: 1 },
       { r1: 2, c1: 4 },
       { r1: 7, c1: 1 },
       { r1: 7, c1: 4 },
+      { r1: 4, c1: 2, blockType: "movable_green" },
+      { r1: 5, c1: 3, blockType: "movable_green" },
     ],
   },
 
@@ -142,7 +144,7 @@ export const CAMPAIGN_BLUEPRINTS: CampaignBlueprint[] = [
     description: "Four blocks pinch the midline crossing. Seize the bottlenecks to trap your rival.",
     rows: 10,
     cols: 6,
-    botDifficulty: 7,
+    botDifficulty: 6,
     neutralBlocks: [
       { r1: 4, c1: 1 },
       { r1: 4, c1: 4 },
@@ -153,7 +155,7 @@ export const CAMPAIGN_BLUEPRINTS: CampaignBlueprint[] = [
 
   // ── Multi Sub-Board Stages (11–20) ──
   // Each sub-board functions independently with its own territory and midline.
-  // Rule: You can only expand into opponent territory within that sub-board, but cannot click.
+  // Expansions and slides stay inside the block's sub-board.
 
   // ── Stages 11–13: Two Independent Sub-Boards (Different Sizes) ──
   {
@@ -163,7 +165,7 @@ export const CAMPAIGN_BLUEPRINTS: CampaignBlueprint[] = [
     description: "Two independent sub-boards (10×3 & 8×3). Fight across two fronts simultaneously.",
     rows: 10,
     cols: 6,
-    botDifficulty: 6,
+    botDifficulty: 7,
     subBoards: [
       { id: "sb-1", name: "Left Front", r1: 0, c1: 0, r2: 9, c2: 2 },
       { id: "sb-2", name: "Right Front", r1: 1, c1: 3, r2: 8, c2: 5 },
@@ -173,13 +175,17 @@ export const CAMPAIGN_BLUEPRINTS: CampaignBlueprint[] = [
     id: "campaign-12",
     campaignNumber: 12,
     name: "Asymmetric Arenas",
-    description: "Two asymmetric sub-boards: a narrow 10×2 duel lane and a wide 10×4 grand field.",
+    description: "A narrow lane with sliding green blocks runs alongside a wider field.",
     rows: 10,
     cols: 6,
     botDifficulty: 7,
     subBoards: [
       { id: "sb-1", name: "Narrow Gate", r1: 0, c1: 0, r2: 9, c2: 1 },
       { id: "sb-2", name: "Grand Field", r1: 0, c1: 2, r2: 9, c2: 5 },
+    ],
+    neutralBlocks: [
+      { r1: 4, c1: 0, blockType: "movable_green" },
+      { r1: 5, c1: 1, blockType: "movable_green" },
     ],
   },
   {
@@ -208,7 +214,7 @@ export const CAMPAIGN_BLUEPRINTS: CampaignBlueprint[] = [
     description: "Three independent lane sub-boards (10×2, 8×2, and 10×2). Manage three battle lines.",
     rows: 10,
     cols: 6,
-    botDifficulty: 7,
+    botDifficulty: 8,
     subBoards: [
       { id: "sb-1", name: "West Lane", r1: 0, c1: 0, r2: 9, c2: 1 },
       { id: "sb-2", name: "Center Spine", r1: 1, c1: 2, r2: 8, c2: 3 },
@@ -222,7 +228,7 @@ export const CAMPAIGN_BLUEPRINTS: CampaignBlueprint[] = [
     description: "Three sub-boards of varying heights (8×2, 10×2, 6×2). Flank the grand central keep.",
     rows: 10,
     cols: 6,
-    botDifficulty: 7,
+    botDifficulty: 8,
     subBoards: [
       { id: "sb-1", name: "Left Flank", r1: 1, c1: 0, r2: 8, c2: 1 },
       { id: "sb-2", name: "High Keep", r1: 0, c1: 2, r2: 9, c2: 3 },
@@ -233,7 +239,7 @@ export const CAMPAIGN_BLUEPRINTS: CampaignBlueprint[] = [
     id: "campaign-16",
     campaignNumber: 16,
     name: "Triad Bastion",
-    description: "Three separate arenas with a central chokepoint obstacle in the middle sub-board.",
+    description: "The center has a black obstacle, and green blocks can shift the outer lanes.",
     rows: 10,
     cols: 6,
     botDifficulty: 8,
@@ -244,6 +250,8 @@ export const CAMPAIGN_BLUEPRINTS: CampaignBlueprint[] = [
     ],
     neutralBlocks: [
       { r1: 4, c1: 2 },
+      { r1: 4, c1: 0, blockType: "movable_green" },
+      { r1: 5, c1: 5, blockType: "movable_green" },
     ],
   },
   {
@@ -253,7 +261,7 @@ export const CAMPAIGN_BLUEPRINTS: CampaignBlueprint[] = [
     description: "Three staggered sub-boards (6×2, 10×2, and 8×2). Coordinate extrusion across fronts.",
     rows: 10,
     cols: 6,
-    botDifficulty: 8,
+    botDifficulty: 9,
     subBoards: [
       { id: "sb-1", name: "Court A", r1: 2, c1: 0, r2: 7, c2: 1 },
       { id: "sb-2", name: "Court B", r1: 0, c1: 2, r2: 9, c2: 3 },
@@ -281,7 +289,7 @@ export const CAMPAIGN_BLUEPRINTS: CampaignBlueprint[] = [
     id: "campaign-19",
     campaignNumber: 19,
     name: "Four Fronts",
-    description: "Four asymmetric sub-boards (4×2, 5×4, 5×4, 4×2). Master parallel block extrusion.",
+    description: "Four asymmetric sub-boards with green sliding blocks in the two larger fronts.",
     rows: 10,
     cols: 6,
     botDifficulty: 9,
@@ -290,6 +298,10 @@ export const CAMPAIGN_BLUEPRINTS: CampaignBlueprint[] = [
       { id: "sb-2", name: "Sector Beta", r1: 0, c1: 2, r2: 4, c2: 5 },
       { id: "sb-3", name: "Sector Gamma", r1: 5, c1: 0, r2: 9, c2: 3 },
       { id: "sb-4", name: "Sector Delta", r1: 6, c1: 4, r2: 9, c2: 5 },
+    ],
+    neutralBlocks: [
+      { r1: 2, c1: 3, blockType: "movable_green" },
+      { r1: 7, c1: 2, blockType: "movable_green" },
     ],
   },
   {
