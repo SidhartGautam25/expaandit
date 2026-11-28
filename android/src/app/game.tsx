@@ -622,14 +622,14 @@ export default function GameScreen() {
               density={layoutDensity}
             />
           </View>
-          {isForcedOpponentPlay && (
+          {/*isForcedOpponentPlay && (
             <View style={styles.forcedPlayBanner} accessibilityLiveRegion="polite">
               <Text style={styles.forcedPlayText}>No own moves! Forced to play for Opponent</Text>
             </View>
-          )}
-          {!isInteractionDisabled && legalMoves.some((move) => move.type === "spawn_green") && (
+          )*/}
+          {/*!isInteractionDisabled && legalMoves.some((move) => move.type === "spawn_green") && (
             <Text style={styles.greenPlacementHint}>Hold an empty neutral tile to place a green block.</Text>
-          )}
+          )*/}
         </View>
 
         <View
